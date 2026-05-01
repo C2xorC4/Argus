@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "use-after-free",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "use_after_free",
+      "severity": "high",
+      "function": "session_log",
+      "detector": "analysis/heap.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/wnapi_heap_internals]]"
+      ],
+      "cwe": ["CWE-416"],
+      "mitre_attack": ["T1203"],
+      "description": "Global pointer freed in session_close, then dereferenced in session_log",
+      "evidence_signatures": [
+        {"kind": "global_freed_then_read", "global": "g_session", "free_function": "session_close", "use_function": "session_log"},
+        {"kind": "import", "name": "free"},
+        {"kind": "no_null_assignment_after_free", "function": "session_close"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "direct-syscall",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "direct_syscall_stub",
+      "severity": "high",
+      "function": "do_syscall",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/em_direct_syscall_ssn_resolution]]"
+      ],
+      "cwe": [],
+      "mitre_attack": ["T1106", "T1027"],
+      "description": "Stub mirrors NTDLL Nt-prefixed prologue (mov r10,rcx; mov eax,imm32; syscall; ret) outside ntdll.dll image",
+      "evidence_signatures": [
+        {"kind": "syscall_instruction_outside_ntdll", "function": "do_syscall"},
+        {"kind": "ntdll_prologue_pattern", "pattern": "mov r10, rcx; mov eax, imm32; syscall; ret"},
+        {"kind": "import", "name": "GetProcAddress"},
+        {"kind": "literal_string", "value": "NtClose"}
+      ]
+    }
+  ]
+}

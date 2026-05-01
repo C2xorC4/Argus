@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "type-confusion",
+    "language": "go",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "type_confusion",
+      "severity": "high",
+      "function": "main.main",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]"
+      ],
+      "cwe": ["CWE-843"],
+      "description": "*(*B)(unsafe.Pointer(&a)) reinterprets struct A bytes as struct B"
+    }
+  ]
+}

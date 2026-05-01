@@ -1,0 +1,31 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "permissive-sddl",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "permissive_sddl",
+      "severity": "high",
+      "function": "wmain",
+      "detector": "analysis/surface.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]",
+        "[[Memory/Knowledge/gameguard_research_22_findings]]"
+      ],
+      "cwe": ["CWE-732"],
+      "mitre_attack": ["T1068"],
+      "description": "CreateNamedPipeW with SDDL granting Everyone GENERIC_ALL",
+      "evidence_signatures": [
+        {"kind": "import", "name": "ConvertStringSecurityDescriptorToSecurityDescriptorW"},
+        {"kind": "import", "name": "CreateNamedPipeW"},
+        {"kind": "string_constant", "value": "D:(A;;GA;;;WD)"},
+        {"kind": "ipc_object_type", "value": "named_pipe"}
+      ]
+    }
+  ]
+}

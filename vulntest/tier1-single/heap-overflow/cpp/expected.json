@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "heap-overflow",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "heap_buffer_overflow",
+      "severity": "high",
+      "function": "Buffer::store",
+      "detector": "analysis/heap.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/wnapi_heap_internals]]"
+      ],
+      "cwe": ["CWE-122"],
+      "mitre_attack": ["T1203"],
+      "description": "memcpy into Buffer::data_ with size from std::string::size() — allocation size 64 unrelated to copy length",
+      "evidence_signatures": [
+        {"kind": "operator_new_array_size", "function": "Buffer::Buffer", "size": 64},
+        {"kind": "import_or_symbol", "name": "memcpy"},
+        {"kind": "alloc_vs_copy_size_mismatch", "alloc_function": "Buffer::Buffer", "copy_function": "Buffer::store"}
+      ]
+    }
+  ]
+}

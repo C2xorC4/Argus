@@ -1,0 +1,24 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "seh-veh-abuse",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "veh_handler_install",
+      "severity": "medium",
+      "function": "main",
+      "detector": "analysis/surface.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/em_covert_execution_tls_seh]]",
+        "[[Memory/Knowledge/em_veh_hwbp_hook_evasion]]"
+      ],
+      "mitre_attack": ["T1574"],
+      "description": "AddVectoredExceptionHandler with handler that modifies Rip to skip instructions"
+    }
+  ]
+}

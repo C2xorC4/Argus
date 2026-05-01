@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "insecure-deserialization",
+    "language": "rust",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "insecure_deserialization",
+      "severity": "medium",
+      "function": "vuln::main",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-502"],
+      "description": "bincode::deserialize on attacker-controlled bytes with no length cap; allocations driven by attacker"
+    }
+  ]
+}

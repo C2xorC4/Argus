@@ -1,0 +1,42 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "stack-overflow",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "stack_buffer_overflow",
+      "severity": "high",
+      "function": "greet",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/hw_stack_overflow_mechanics]]"
+      ],
+      "cwe": ["CWE-121"],
+      "mitre_attack": ["T1203"],
+      "description": "Unbounded strcpy from argv-derived source into 64-byte stack buffer",
+      "evidence_signatures": [
+        {"kind": "import", "name": "strcpy"},
+        {"kind": "stack_alloc_size", "function": "greet", "size": 64},
+        {"kind": "taint_flow", "source": "argv", "sink": "strcpy:src"}
+      ],
+      "target_mitigations": {
+        "stack_canary": false,
+        "pie": false,
+        "nx": true,
+        "cfg": false,
+        "cet": false
+      }
+    }
+  ],
+  "negative_findings": [
+    {
+      "category": "stack_buffer_overflow",
+      "function": "main",
+      "rationale": "main only forwards argv to greet; the unbounded copy is in greet"
+    }
+  ]
+}

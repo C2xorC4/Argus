@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "use-after-free",
+    "language": "go",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "use_after_free",
+      "severity": "medium",
+      "function": "main.main",
+      "detector": "analysis/heap.py",
+      "cwe": ["CWE-416"],
+      "description": "unsafe.Pointer to slice backing array held across grow operation; pointer may dangle after realloc"
+    }
+  ]
+}

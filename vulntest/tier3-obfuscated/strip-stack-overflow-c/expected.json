@@ -1,0 +1,39 @@
+{
+  "$schema": "../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 3,
+    "obfuscation": "symbol-stripping",
+    "source_cell": "tier1-single/stack-overflow/c",
+    "difficulty": 31
+  },
+  "binary_attributes": {
+    "symbols_stripped": true,
+    "dwarf_present": false,
+    "pdb_present": false
+  },
+  "findings": [
+    {
+      "category": "stack_buffer_overflow",
+      "severity": "high",
+      "function": "sub_<addr>",
+      "function_name_recoverable": false,
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/hw_stack_overflow_mechanics]]"
+      ],
+      "cwe": ["CWE-121"],
+      "description": "Stack-buffer-overflow detection survives symbol stripping; structural signature (import + alloc size + unbounded copy) is sufficient",
+      "evidence_signatures": [
+        {"kind": "import", "name": "strcpy"},
+        {"kind": "stack_alloc_size", "size": 64},
+        {"kind": "taint_flow", "source": "argv", "sink": "strcpy:src"}
+      ]
+    },
+    {
+      "category": "obfuscation_marker",
+      "severity": "info",
+      "detector": "analysis/obfuscation.py",
+      "description": "Binary has no symbol table — annotate downstream Findings as anonymous-function references"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "pre-verify-write",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "pre_verification_write",
+      "severity": "high",
+      "function": "wmain",
+      "detector": "analysis/chains.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"
+      ],
+      "cwe": ["CWE-471", "CWE-377"],
+      "description": "WriteFile precedes verify_payload; failure path returns without DeleteFileW",
+      "evidence_signatures": [
+        {"kind": "write_then_check_no_cleanup", "function": "wmain"},
+        {"kind": "import", "name": "WriteFile"},
+        {"kind": "no_import", "name": "DeleteFileW", "scope": "wmain"}
+      ]
+    }
+  ]
+}

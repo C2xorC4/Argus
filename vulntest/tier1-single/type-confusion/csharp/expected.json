@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "type-confusion",
+    "language": "csharp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "type_confusion",
+      "severity": "high",
+      "function": "Vuln.Confused",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-843"],
+      "description": "unsafe pointer reinterpretation between incompatible structs"
+    }
+  ]
+}

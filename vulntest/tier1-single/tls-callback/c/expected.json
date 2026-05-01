@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "tls-callback",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "tls_callback_first_stage",
+      "severity": "medium",
+      "function": "tls_callback",
+      "detector": "analysis/surface.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/em_covert_execution_tls_seh]]"
+      ],
+      "cwe": [],
+      "mitre_attack": ["T1106"],
+      "description": "PE has IMAGE_TLS_DIRECTORY with non-empty callback array",
+      "evidence_signatures": [
+        {"kind": "pe_directory_present", "directory": "IMAGE_DIRECTORY_ENTRY_TLS"},
+        {"kind": "tls_callback_count_nonzero"}
+      ]
+    }
+  ]
+}

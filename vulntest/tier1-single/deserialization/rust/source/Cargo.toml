@@ -1,0 +1,16 @@
+[package]
+name = "vuln-deserialization"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "vuln"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+
+[profile.dev]
+opt-level = 0
+debug = true

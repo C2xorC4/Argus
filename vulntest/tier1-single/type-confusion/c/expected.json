@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "type-confusion",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "type_confusion",
+      "severity": "high",
+      "function": "process",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/ec_undefined_behavior_taxonomy]]"
+      ],
+      "cwe": ["CWE-843"],
+      "description": "Tagged union member accessed without preceding tag check"
+    }
+  ]
+}

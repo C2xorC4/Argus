@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "prng-security-path",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "weak_prng_in_security_path",
+      "severity": "high",
+      "function": "issue_token()",
+      "detector": "analysis/crypto.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]"
+      ],
+      "cwe": ["CWE-338"],
+      "description": "std::mt19937 seeded from system_clock used to produce session token"
+    }
+  ]
+}

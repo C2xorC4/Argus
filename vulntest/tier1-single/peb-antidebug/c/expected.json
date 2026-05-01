@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "peb-antidebug",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "peb_antidebug_check",
+      "severity": "low",
+      "function": "main",
+      "detector": "analysis/surface.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/em_peb_antidebug_fields]]",
+        "[[Memory/Knowledge/wnapi_segment_register_teb_bootstrap]]"
+      ],
+      "mitre_attack": ["T1622"],
+      "description": "Reads PEB.BeingDebugged via GS:[0x60] (x64) or FS:[0x30] (x86)",
+      "evidence_signatures": [
+        {"kind": "segment_register_read", "register": "gs", "offset": 96},
+        {"kind": "constant_offset_load", "offsets": [0x02, 0xBC]}
+      ]
+    }
+  ]
+}

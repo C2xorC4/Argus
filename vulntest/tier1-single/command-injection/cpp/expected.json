@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "command-injection",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "command_injection",
+      "severity": "critical",
+      "function": "backup(std::string const&)",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-78"],
+      "description": "std::system with std::string concatenation of attacker-controlled filename"
+    }
+  ]
+}

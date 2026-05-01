@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "lcg-xor-cipher",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "lcg_xor_string_cipher",
+      "severity": "info",
+      "function": "lcg_xor_decrypt",
+      "detector": "analysis/obfuscation.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/gameguard_research_22_findings]]"
+      ],
+      "mitre_attack": ["T1027"],
+      "description": "LCG-XOR decryption stub in C++ codebase"
+    }
+  ]
+}

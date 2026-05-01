@@ -1,0 +1,27 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "double-free",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "double_free",
+      "severity": "high",
+      "function": "main",
+      "detector": "analysis/heap.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/wnapi_heap_internals]]"
+      ],
+      "cwe": ["CWE-415"],
+      "mitre_attack": ["T1203"],
+      "description": "entry_destroy frees e.name; main then frees e.name again",
+      "evidence_signatures": [
+        {"kind": "two_free_sites_same_pointer", "first_function": "entry_destroy", "second_function": "main"},
+        {"kind": "import", "name": "free"}
+      ]
+    }
+  ]
+}

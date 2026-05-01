@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "integer-overflow",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "integer_overflow_to_allocation",
+      "severity": "high",
+      "function": "alloc_records(unsigned long)",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-190", "CWE-680"],
+      "description": "new Record[count] with attacker-controlled count; relies on impl bad_array_new_length"
+    }
+  ]
+}

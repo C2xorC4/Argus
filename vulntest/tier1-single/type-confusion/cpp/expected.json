@@ -1,0 +1,27 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "type-confusion",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "type_confusion",
+      "severity": "high",
+      "function": "get_radius(Shape*)",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/ec_undefined_behavior_taxonomy]]",
+        "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]"
+      ],
+      "cwe": ["CWE-843"],
+      "description": "static_cast from polymorphic base to derived without RTTI check",
+      "evidence_signatures": [
+        {"kind": "static_cast_polymorphic_downcast", "function": "get_radius"},
+        {"kind": "no_dynamic_cast_or_typeid_check", "function": "get_radius"}
+      ]
+    }
+  ]
+}

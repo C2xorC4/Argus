@@ -1,0 +1,89 @@
+# Argus — Vulnerability-Research Pipeline
+#
+# This is a private development tree by default. The toolchain
+# is intended to ship publicly once the per-module sanitisation
+# review passes, but the working tree contains private artefacts
+# (real-world test targets, operator scratch findings, in-progress
+# PoCs against pre-disclosure vendor programs) that must not leak.
+
+# ── Python build / cache ─────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+env/
+
+# ── Editor / OS state ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Operator artefacts (kept out of source) ─────────────────────
+findings/
+sessions/
+session-*.json
+manifest-*.json
+crashes/
+fuzz_corpus/
+poc_artifacts/
+*.core
+core.*
+*.dmp
+
+# ── Real-world test targets (keep VulnTest synthetics; exclude live samples) ──
+vulntest/_external/
+vulntest/_samples/
+vulntest/private/
+**/private-targets/
+
+# ── Binary Ninja state ──────────────────────────────────────────
+*.bndb
+*.bnpkg
+.binaryninja/
+
+# ── SARIF / report outputs ──────────────────────────────────────
+*.sarif
+reports/
+out/
+output/
+
+# ── Compiled VulnTest binaries (kept by tier subdirs that opt in) ──
+vulntest/**/build/
+vulntest/**/bin/
+vulntest/**/*.exe
+vulntest/**/*.dll
+vulntest/**/*.so
+vulntest/**/*.dylib
+vulntest/**/*.o
+vulntest/**/*.obj
+vulntest/**/*.pdb
+vulntest/**/*.ilk
+# Allow per-cell expected-finding manifests to ship
+!vulntest/**/expected.json
+
+# ── Local-only Claude config ────────────────────────────────────
+.claude/settings.local.json
+
+# ── Per-host Argus overrides ────────────────────────────────────
+# Operator-specific install paths, toolchain overrides, etc.
+# Defaults live in config/argus.toml (committed). Per-host customisation
+# goes in config/argus.local.toml. The .example template is committed;
+# the working file is not.
+config/argus.local.toml

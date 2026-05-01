@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "api-hash-resolution",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "api_hash_resolution",
+      "severity": "high",
+      "function": "resolve_by_hash",
+      "detector": "analysis/obfuscation.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/em_hook_evasion_three_approaches]]"
+      ],
+      "mitre_attack": ["T1027"],
+      "description": "Custom hash routine + walk of IMAGE_EXPORT_DIRECTORY by hash comparison",
+      "evidence_signatures": [
+        {"kind": "djb2_pattern", "constants": [5381, 33]},
+        {"kind": "image_export_directory_walk", "function": "resolve_by_hash"},
+        {"kind": "hash_imm32_in_text", "section": ".text"}
+      ]
+    }
+  ]
+}

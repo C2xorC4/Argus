@@ -1,0 +1,35 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "stack-overflow",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "stack_buffer_overflow",
+      "severity": "high",
+      "function": "Greeter::promptAndGreet",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/hw_stack_overflow_mechanics]]"
+      ],
+      "cwe": ["CWE-121", "CWE-242"],
+      "mitre_attack": ["T1203"],
+      "description": "Unbounded std::cin operator>>(char*) into 64-byte stack buffer",
+      "evidence_signatures": [
+        {"kind": "import_or_symbol", "name": "std::basic_istream::operator>>(char*)"},
+        {"kind": "stack_alloc_size", "function": "Greeter::promptAndGreet", "size": 64},
+        {"kind": "taint_flow", "source": "std::cin", "sink": "operator>>:dst"}
+      ],
+      "target_mitigations": {
+        "stack_canary": false,
+        "pie": false,
+        "nx": true,
+        "cfg": false,
+        "cet": false
+      }
+    }
+  ]
+}

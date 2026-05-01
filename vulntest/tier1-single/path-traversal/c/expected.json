@@ -1,0 +1,25 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "path-traversal",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "path_traversal",
+      "severity": "high",
+      "function": "read_file",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-22", "CWE-23"],
+      "mitre_attack": ["T1083", "T1005"],
+      "description": "fopen path built by snprintf concatenation with no canonicalisation",
+      "evidence_signatures": [
+        {"kind": "import", "name": "fopen"},
+        {"kind": "no_realpath_or_canonicalize", "function": "read_file"},
+        {"kind": "taint_flow", "source": "argv", "sink": "fopen:path"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "use-after-free",
+    "language": "rust",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "use_after_free",
+      "severity": "high",
+      "function": "vuln::main",
+      "detector": "analysis/heap.py",
+      "cwe": ["CWE-416"],
+      "description": "Box::into_raw + Box::from_raw frees the heap object; subsequent (*raw).value reads after free"
+    }
+  ]
+}

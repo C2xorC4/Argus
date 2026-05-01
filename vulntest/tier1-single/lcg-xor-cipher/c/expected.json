@@ -1,0 +1,27 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "lcg-xor-cipher",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "lcg_xor_string_cipher",
+      "severity": "info",
+      "function": "lcg_xor_decrypt",
+      "detector": "analysis/obfuscation.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/gameguard_research_22_findings]]"
+      ],
+      "cwe": [],
+      "mitre_attack": ["T1027"],
+      "description": "Linear-congruential-generator XOR decryption stub — string-cipher obfuscation pattern",
+      "evidence_signatures": [
+        {"kind": "lcg_constants", "constants": [1103515245, 12345]},
+        {"kind": "xor_loop_with_lcg", "function": "lcg_xor_decrypt"}
+      ]
+    }
+  ]
+}

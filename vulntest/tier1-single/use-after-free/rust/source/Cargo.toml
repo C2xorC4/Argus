@@ -1,0 +1,12 @@
+[package]
+name = "vuln-uaf"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "vuln"
+path = "src/main.rs"
+
+[profile.dev]
+opt-level = 0
+debug = true

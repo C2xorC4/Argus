@@ -1,0 +1,25 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "command-injection",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "command_injection",
+      "severity": "critical",
+      "function": "backup",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-78"],
+      "mitre_attack": ["T1059"],
+      "description": "system() called with snprintf-formatted attacker-controlled filename",
+      "evidence_signatures": [
+        {"kind": "import", "name": "system"},
+        {"kind": "import", "name": "snprintf"},
+        {"kind": "taint_flow", "source": "argv", "sink": "system:cmd"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "double-free",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "double_free",
+      "severity": "high",
+      "function": "Owner::~Owner",
+      "detector": "analysis/heap.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/wnapi_heap_internals]]"
+      ],
+      "cwe": ["CWE-415", "CWE-1336"],
+      "description": "Owner has owning raw pointer but no copy ctor / op= — Rule of Three violation produces shallow copy and dual delete on destruction",
+      "evidence_signatures": [
+        {"kind": "rule_of_three_violation", "class": "Owner"},
+        {"kind": "destructor_deletes_field", "class": "Owner", "field": "data_"},
+        {"kind": "no_user_copy_constructor", "class": "Owner"}
+      ]
+    }
+  ]
+}

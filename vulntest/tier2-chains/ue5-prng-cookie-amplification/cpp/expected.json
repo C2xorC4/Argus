@@ -1,0 +1,42 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 2,
+    "class": "ue5-prng-cookie-amplification",
+    "language": "cpp",
+    "difficulty": 23,
+    "chain_depth": 3
+  },
+  "findings": [
+    {
+      "category": "weak_prng_in_security_path",
+      "severity": "critical",
+      "primitive_index": 1,
+      "knowledge_refs": ["[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]"],
+      "cwe": ["CWE-338"]
+    },
+    {
+      "category": "signed_token_with_recoverable_secret",
+      "severity": "critical",
+      "primitive_index": 2,
+      "knowledge_refs": ["[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]"],
+      "cwe": ["CWE-345"]
+    },
+    {
+      "category": "size_amplification",
+      "severity": "high",
+      "primitive_index": 3,
+      "knowledge_refs": ["[[Memory/Knowledge/ue5_fstring_allocation_amplification]]"],
+      "cwe": ["CWE-405", "CWE-770"]
+    },
+    {
+      "category": "chain_pattern",
+      "severity": "critical",
+      "detector": "analysis/chains.py",
+      "chain_name": "prng-cookie-amplification",
+      "knowledge_refs": ["[[Memory/Knowledge/ue5_server_crash_chain_prng_fstring]]"],
+      "mitre_attack": ["T1499"],
+      "description": "Composition matches UE5 PRNG → cookie-forge → amplification chain"
+    }
+  ]
+}

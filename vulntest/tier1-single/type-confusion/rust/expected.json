@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "type-confusion",
+    "language": "rust",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "type_confusion",
+      "severity": "high",
+      "function": "vuln::main",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-843"],
+      "description": "std::mem::transmute between structs with different validity invariants"
+    }
+  ]
+}

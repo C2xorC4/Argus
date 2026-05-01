@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "format-string",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "format_string",
+      "severity": "high",
+      "function": "log_message",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/em_advanced_injection_variants]]"
+      ],
+      "cwe": ["CWE-134"],
+      "mitre_attack": ["T1203"],
+      "description": "printf called with attacker-controlled format string (argv-derived)",
+      "evidence_signatures": [
+        {"kind": "import", "name": "printf"},
+        {"kind": "format_arg_non_constant", "function": "log_message", "callee": "printf", "arg_index": 0},
+        {"kind": "taint_flow", "source": "argv", "sink": "printf:fmt"}
+      ]
+    }
+  ]
+}

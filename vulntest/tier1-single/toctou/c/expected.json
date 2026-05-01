@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "toctou",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "toctou",
+      "severity": "high",
+      "function": "read_user_file",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"
+      ],
+      "cwe": ["CWE-367"],
+      "mitre_attack": ["T1574.005"],
+      "description": "access() check followed by fopen() with the same path; the path operand is read twice from filesystem without lock",
+      "evidence_signatures": [
+        {"kind": "import", "name": "access"},
+        {"kind": "import", "name": "fopen"},
+        {"kind": "check_then_use_same_path", "function": "read_user_file"}
+      ]
+    }
+  ]
+}

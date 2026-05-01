@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "use-after-free",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "use_after_free",
+      "severity": "critical",
+      "function": "Manager::heartbeat",
+      "detector": "analysis/heap.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/wnapi_heap_internals]]"
+      ],
+      "cwe": ["CWE-416"],
+      "mitre_attack": ["T1203"],
+      "description": "Manager::res_ deleted in close(), method invoked in heartbeat() — virtual-call dispatch on freed object",
+      "evidence_signatures": [
+        {"kind": "operator_delete", "function": "Manager::close", "field": "res_"},
+        {"kind": "field_no_null_after_delete", "function": "Manager::close", "field": "res_"},
+        {"kind": "method_call_on_field", "function": "Manager::heartbeat", "field": "res_"}
+      ]
+    }
+  ]
+}

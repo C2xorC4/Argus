@@ -1,0 +1,25 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "off-by-one",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "off_by_one",
+      "severity": "medium",
+      "function": "normalize",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/ue5_fstring_allocation_amplification]]"
+      ],
+      "cwe": ["CWE-193"],
+      "description": "Loop bound `i <= len` writes one byte past the destination",
+      "evidence_signatures": [
+        {"kind": "loop_bound_inclusive_with_buffer_size", "function": "normalize", "operator": "le"}
+      ]
+    }
+  ]
+}

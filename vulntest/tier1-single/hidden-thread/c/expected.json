@@ -1,0 +1,27 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "hidden-thread",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "hidden_from_debugger_thread",
+      "severity": "medium",
+      "function": "main",
+      "detector": "analysis/surface.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/em_covert_execution_tls_seh]]"
+      ],
+      "mitre_attack": ["T1622"],
+      "description": "NtSetInformationThread call with ThreadInformationClass = 0x11 (ThreadHideFromDebugger)",
+      "evidence_signatures": [
+        {"kind": "literal_string", "value": "NtSetInformationThread"},
+        {"kind": "constant_argument", "callee": "NtSetInformationThread", "arg_index": 1, "value": 17}
+      ]
+    }
+  ]
+}

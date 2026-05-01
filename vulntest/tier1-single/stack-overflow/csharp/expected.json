@@ -1,0 +1,27 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "stack-overflow",
+    "language": "csharp",
+    "platform": "any-clr",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "stack_buffer_overflow",
+      "severity": "high",
+      "function": "Vuln.Greet",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/hw_stack_overflow_mechanics]]"
+      ],
+      "cwe": ["CWE-121"],
+      "description": "stackalloc + unsafe pointer write loop without bound check",
+      "evidence_signatures": [
+        {"kind": "il_instruction", "name": "localloc"},
+        {"kind": "unsafe_block_pointer_write_in_loop"}
+      ]
+    }
+  ]
+}

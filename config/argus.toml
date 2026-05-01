@@ -1,0 +1,86 @@
+# Argus — committed configuration defaults.
+#
+# Per-host overrides live in `argus.local.toml` (gitignored).
+# Environment variables override both. See scripts/lib/config.py
+# for the full resolution chain.
+
+schema_version = 1
+
+[host]
+# Auto-detected via socket.gethostname() if blank.
+hostname = ""
+
+[binja]
+# Install paths searched in order; first existing wins. Override per
+# host in argus.local.toml. Operator's known hosts:
+#   - windows desktop / laptop:  C:/Program Files/Vector35/BinaryNinja
+#   - legion (linux):            /opt/binaryninja
+#   - strx (linux):              /opt/binaryninja
+search_paths = [
+    "C:/Program Files/Vector35/BinaryNinja",
+    "/opt/binaryninja",
+    "/Applications/Binary Ninja.app/Contents/MacOS",
+]
+# Python module subdir relative to install root.
+python_subdir = "python"
+# Explicit override; skips search_paths if non-empty.
+python_path = ""
+
+# Default headless analysis options. Per-task overrides via
+# BinjaSession kwargs.
+analysis_mode = "full"           # basic | intermediate | full
+update_analysis = true
+linear_sweep_autorun = true
+
+[ljm]
+# LittleJohnnyMnemonic vault root.
+vault_path = "D:/Repos/LLM/LittleJohnnyMnemonic"
+# jm CLI path; blank = autodetect (env var → PATH → vault_path/agent/jm[.exe]).
+jm_path = ""
+
+[toolchains]
+# Build executables for the VulnTest corpus, per platform. Argus
+# never invokes these directly during analysis — the VulnTest
+# Makefiles do — but the config carries them so build runners and
+# CI can pick the right tool.
+
+[toolchains.c]
+windows = "gcc"
+linux = "gcc"
+darwin = "clang"
+
+[toolchains.cpp]
+windows = "g++"
+linux = "g++"
+darwin = "clang++"
+
+[toolchains.cgo]
+# CGO build needs a C cross-compiler reachable to the Go toolchain.
+windows = "x86_64-w64-mingw32-gcc"
+linux = "gcc"
+darwin = "clang"
+
+[toolchains.csharp]
+csc = "csc"
+
+[toolchains.rust]
+cargo = "cargo"
+
+[toolchains.go]
+go = "go"
+
+[paths]
+# Output directories. Relative paths are resolved against the
+# Argus repo root; absolute paths are used as-is.
+findings_dir = "findings"
+sessions_dir = "sessions"
+crashes_dir = "crashes"
+sarif_out   = "out/sarif"
+report_out  = "out/reports"
+
+[budgets]
+# Per-stage cost / time caps. Kept conservative; raise in
+# argus.local.toml on capable machines.
+max_seconds_per_stage     = 600
+max_findings_per_run      = 1000
+binja_analysis_timeout_s  = 300

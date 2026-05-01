@@ -1,0 +1,26 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "uninit-mem-disclosure",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "uninitialised_memory_disclosure",
+      "severity": "medium",
+      "function": "emit_status",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/ec_undefined_behavior_taxonomy]]"
+      ],
+      "cwe": ["CWE-457", "CWE-908"],
+      "description": "struct status fields/padding only partially initialised, whole struct written to output",
+      "evidence_signatures": [
+        {"kind": "stack_struct_partial_init", "function": "emit_status", "struct": "status"},
+        {"kind": "fwrite_full_size", "function": "emit_status"}
+      ]
+    }
+  ]
+}

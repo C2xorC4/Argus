@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "format-string",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "format_string",
+      "severity": "high",
+      "function": "log_message(std::string const&)",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-134"],
+      "description": "std::printf with format from std::string::c_str() of attacker-controlled string"
+    }
+  ]
+}

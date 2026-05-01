@@ -1,0 +1,29 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "integer-overflow",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "integer_overflow_to_allocation",
+      "severity": "high",
+      "function": "alloc_records",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/ec_undefined_behavior_taxonomy]]",
+        "[[Memory/Knowledge/ue5_fstring_allocation_amplification]]"
+      ],
+      "cwe": ["CWE-190", "CWE-680"],
+      "mitre_attack": ["T1203"],
+      "description": "size_t multiplication of count × sizeof(record_t) feeds malloc with no overflow check",
+      "evidence_signatures": [
+        {"kind": "arithmetic_to_alloc", "function": "alloc_records", "op": "mul", "alloc": "malloc"},
+        {"kind": "no_overflow_check", "function": "alloc_records"},
+        {"kind": "taint_flow", "source": "argv|strtoull", "sink": "malloc:size"}
+      ]
+    }
+  ]
+}

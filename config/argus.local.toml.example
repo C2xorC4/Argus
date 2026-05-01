@@ -1,0 +1,57 @@
+# Per-host overrides for Argus configuration.
+#
+# Copy this file to `argus.local.toml` (which is gitignored) and
+# customise. Anything you set here overrides the same key in
+# `argus.toml`. Anything you don't set inherits the default.
+#
+# Resolution order (highest priority last):
+#   1. argus.toml             (committed defaults)
+#   2. argus.local.toml       (this file, per-host)
+#   3. environment variables  (ARGUS_BINJA_PYTHON_PATH, ARGUS_JM_PATH,
+#                              ARGUS_FINDINGS_DIR, ...)
+#   4. explicit code args     (BinjaSession(binja_python_path=...) etc.)
+
+# ── Identity ─────────────────────────────────────────────────────
+[host]
+# hostname = "legion"
+# hostname = "strx"
+# hostname = "windows-desktop"
+
+# ── Binary Ninja ─────────────────────────────────────────────────
+[binja]
+# Pin to one path on this host (skips search_paths if set):
+# python_path = "C:/Program Files/Vector35/BinaryNinja/python"
+# python_path = "/opt/binaryninja/python"
+
+# Or restrict search_paths to one entry:
+# search_paths = ["C:/Program Files/Vector35/BinaryNinja"]
+
+# analysis_mode = "intermediate"  # faster than "full" for triage runs
+
+# ── LJM ──────────────────────────────────────────────────────────
+[ljm]
+# jm_path = "D:/Repos/LLM/LittleJohnnyMnemonic/agent/jm.exe"     # windows
+# jm_path = "/home/c2xor/repos/LLM/LittleJohnnyMnemonic/agent/jm" # linux
+
+# ── Toolchains ───────────────────────────────────────────────────
+# Override build executables by platform. Useful when the system
+# default is wrong for VulnTest builds (e.g., a Cygwin gcc instead
+# of MinGW on a windows host).
+
+# [toolchains.c]
+# windows = "C:/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe"
+
+# [toolchains.cpp]
+# windows = "C:/msys64/mingw64/bin/x86_64-w64-mingw32-g++.exe"
+
+# ── Paths ────────────────────────────────────────────────────────
+# Override output locations on this host (e.g., point findings at a
+# fast SSD, or a network share).
+# [paths]
+# findings_dir = "D:/argus-findings"
+
+# ── Budgets ──────────────────────────────────────────────────────
+# Raise on capable machines, lower on laptops.
+# [budgets]
+# max_seconds_per_stage    = 1800
+# binja_analysis_timeout_s = 900

@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "path-traversal",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "path_traversal",
+      "severity": "high",
+      "function": "read_file(std::string const&)",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-22"],
+      "description": "std::ifstream with std::filesystem::path operator/ concat, no canonicalise"
+    }
+  ]
+}

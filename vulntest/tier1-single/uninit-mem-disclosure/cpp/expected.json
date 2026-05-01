@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "uninit-mem-disclosure",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "uninitialised_memory_disclosure",
+      "severity": "medium",
+      "function": "emit_status",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-457", "CWE-908"],
+      "description": "Status struct default-initialised with indeterminate fields, then full-size cout.write"
+    }
+  ]
+}

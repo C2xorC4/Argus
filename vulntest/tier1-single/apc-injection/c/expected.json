@@ -1,0 +1,29 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "apc-injection",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "apc_injection",
+      "severity": "high",
+      "function": "main",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/em_advanced_injection_variants]]",
+        "[[Memory/Knowledge/bhg_process_injection_fundamentals]]"
+      ],
+      "mitre_attack": ["T1055.004"],
+      "description": "QueueUserAPC / NtQueueApcThread call paired with alertable-wait sink",
+      "evidence_signatures": [
+        {"kind": "import", "name": "QueueUserAPC"},
+        {"kind": "import", "name": "SleepEx"},
+        {"kind": "alertable_wait_pairing"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "prng-security-path",
+    "language": "c",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "weak_prng_in_security_path",
+      "severity": "high",
+      "function": "issue_token",
+      "detector": "analysis/crypto.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]"
+      ],
+      "cwe": ["CWE-338", "CWE-330"],
+      "mitre_attack": ["T1600"],
+      "description": "rand() output flows to session token via known-time srand seed",
+      "evidence_signatures": [
+        {"kind": "import", "name": "rand"},
+        {"kind": "import", "name": "srand"},
+        {"kind": "import", "name": "time"},
+        {"kind": "data_flow", "source": "rand", "sink": "session_token"}
+      ]
+    }
+  ]
+}

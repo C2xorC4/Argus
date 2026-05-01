@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "toctou",
+    "language": "cpp",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "toctou",
+      "severity": "high",
+      "function": "read_user_file(std::filesystem::path const&)",
+      "detector": "analysis/taint.py",
+      "cwe": ["CWE-367"],
+      "description": "fs::exists() check followed by std::ifstream open of same path"
+    }
+  ]
+}

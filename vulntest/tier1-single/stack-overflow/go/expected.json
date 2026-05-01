@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "stack-overflow",
+    "language": "go",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "stack_buffer_overflow",
+      "severity": "high",
+      "function": "_cgo_<hash>_Cfunc_greet",
+      "detector": "analysis/taint.py",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]"
+      ],
+      "cwe": ["CWE-121"],
+      "description": "cgo C function uses strcpy on attacker-controlled string from Go caller"
+    }
+  ]
+}
