@@ -271,6 +271,24 @@ PATTERNS: list[Pattern] = [
 ]
 
 
+# Umbrella categories — when a precise variant fires, also emit the
+# umbrella category so consumers that reason at the higher level
+# (Tier-1 expected.json, vendor reports) match cleanly. Both
+# Findings link back to the same pattern's Knowledge refs.
+UMBRELLA_MAP: dict[str, str] = {
+    "process_injection_crt":    "process_injection",
+    "process_injection_crt_nt": "process_injection",
+    "apc_injection_local":      "apc_injection",
+    "apc_injection_remote":     "apc_injection",
+    "apc_injection_nt":         "apc_injection",
+    "process_hollowing":        "process_injection",
+    "process_doppelganging":    "process_injection",
+    "atom_bombing":             "apc_injection",
+    "thread_execution_hijack":  "process_injection",
+    "kernel_callback_table_hijack": "process_injection",
+}
+
+
 def match(bv, *, binary: str, arch: str, platform: str,
           detector: str = "heuristics.injection") -> list:
     imports = imports_in(bv)
@@ -288,12 +306,31 @@ def match(bv, *, binary: str, arch: str, platform: str,
             if not hits:
                 continue
             description_extra = f"imports: {', '.join(hits)}"
-        findings.append(emit_finding(
+        # Precise Finding
+        f_precise = emit_finding(
             pat,
             address=0, function="<binary>",
             binary=binary, arch=arch, platform=platform,
             detector=detector,
             description_extra=description_extra,
             details={"matched_imports": names if pat.all_required else hits},
-        ))
+        )
+        findings.append(f_precise)
+        # Umbrella Finding (same evidence, broader category)
+        umbrella = UMBRELLA_MAP.get(pat.category)
+        if umbrella and umbrella != pat.category:
+            f_umb = emit_finding(
+                pat,
+                address=0, function="<binary>",
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                description_extra=description_extra + f" (umbrella of {pat.category})",
+                details={
+                    "matched_imports": names if pat.all_required else hits,
+                    "precise_category": pat.category,
+                },
+            )
+            f_umb.category = umbrella
+            f_umb.id = f_umb.compute_id()
+            findings.append(f_umb)
     return findings

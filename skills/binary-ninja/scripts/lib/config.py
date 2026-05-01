@@ -82,6 +82,12 @@ _DEFAULTS: dict = {
         "max_findings_per_run": 1000,
         "binja_analysis_timeout_s": 300,
     },
+    "lab_target": {
+        "ssh_alias": "",
+        "description": "",
+        "default_workdir": "~/argus",
+        "require_confirm_destructive": True,
+    },
 }
 
 
@@ -185,6 +191,35 @@ class BudgetsConfig:
 
 
 @dataclass
+class LabTargetConfig:
+    """Remote SSH target for Phase 4 dynamic verification.
+
+    `ssh_alias` must match a Host entry in the operator's `~/.ssh/config`
+    so connection details (user, port, identity file, jump host) live
+    where SSH already knows about them. Argus shells out to `ssh
+    <alias> ...` and inherits that resolution.
+
+    `default_workdir` is a remote path Argus may stage scratch artefacts
+    into (PoC sources, probe targets, captured dmesg). Resolves on the
+    remote side — never on the operator's host.
+
+    `require_confirm_destructive` is a layered safety; the bash wrapper
+    `dev/lab_run.sh` reads the same key and will prompt before
+    modprobe / rmmod / mkfs / dd patterns. Phase 4 verifiers respect
+    it analogously.
+    """
+
+    ssh_alias: str
+    description: str
+    default_workdir: str
+    require_confirm_destructive: bool
+
+    def is_configured(self) -> bool:
+        """True iff a usable ssh_alias is set."""
+        return bool(self.ssh_alias.strip())
+
+
+@dataclass
 class ArgusConfig:
     schema_version: int
     hostname: str
@@ -193,6 +228,7 @@ class ArgusConfig:
     toolchains: ToolchainsConfig
     paths: PathsConfig
     budgets: BudgetsConfig
+    lab_target: LabTargetConfig
     repo_root: Path
     config_path: Optional[Path] = None
     local_config_path: Optional[Path] = None
@@ -256,6 +292,7 @@ def _build_typed(merged: dict, root: Path,
     t = merged["toolchains"]
     p = merged["paths"]
     g = merged["budgets"]
+    lt = merged.get("lab_target", _DEFAULTS["lab_target"])
 
     hostname = h.get("hostname", "") or socket.gethostname()
 
@@ -303,6 +340,16 @@ def _build_typed(merged: dict, root: Path,
         binja_analysis_timeout_s=int(g["binja_analysis_timeout_s"]),
     )
 
+    # Env override for ssh_alias — useful in CI / one-off runs against
+    # a different lab without editing argus.local.toml.
+    lab_alias = os.environ.get("ARGUS_LAB_SSH_ALIAS", "") or lt.get("ssh_alias", "")
+    lab_target = LabTargetConfig(
+        ssh_alias=str(lab_alias),
+        description=str(lt.get("description", "")),
+        default_workdir=str(lt.get("default_workdir", "~/argus")),
+        require_confirm_destructive=bool(lt.get("require_confirm_destructive", True)),
+    )
+
     return ArgusConfig(
         schema_version=int(merged.get("schema_version", 1)),
         hostname=hostname,
@@ -311,6 +358,7 @@ def _build_typed(merged: dict, root: Path,
         toolchains=toolchains,
         paths=paths,
         budgets=budgets,
+        lab_target=lab_target,
         repo_root=root,
         config_path=config_path,
         local_config_path=local_config_path,

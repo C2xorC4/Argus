@@ -19,18 +19,18 @@ These docs serve three functions:
 [`_template.md`](manual_workflows/_template.md) — copy this when
 authoring a new companion doc.
 
-## Phase 1 deliverables (planned)
+## Phase 1 deliverables
 
 | Doc | Module | Status |
 |---|---|---|
-| [`analysis-surface.md`](manual_workflows/analysis-surface.md) | `scripts/analysis/surface.py` | planned (Phase 1) |
-| [`analysis-attack-surface.md`](manual_workflows/analysis-attack-surface.md) | `scripts/analysis/attack_surface.py` | planned (Phase 1) |
-| [`analysis-taint.md`](manual_workflows/analysis-taint.md) | `scripts/analysis/taint.py` | planned (Phase 1) |
-| [`analysis-heap.md`](manual_workflows/analysis-heap.md) | `scripts/analysis/heap.py` | planned (Phase 1) |
-| [`analysis-crypto.md`](manual_workflows/analysis-crypto.md) | `scripts/analysis/crypto.py` | planned (Phase 1) |
-| [`analysis-mitigations.md`](manual_workflows/analysis-mitigations.md) | `scripts/analysis/mitigations.py` | planned (Phase 1) |
-| [`analysis-obfuscation.md`](manual_workflows/analysis-obfuscation.md) | `scripts/analysis/obfuscation.py` | planned (Phase 1) |
-| [`analysis-chains.md`](manual_workflows/analysis-chains.md) | `scripts/analysis/chains.py` | planned (Phase 1) |
+| [`analysis-surface.md`](manual_workflows/analysis-surface.md) | `scripts/analysis/surface.py` | done |
+| [`analysis-mitigations.md`](manual_workflows/analysis-mitigations.md) | `scripts/analysis/mitigations.py` | done |
+| [`analysis-taint.md`](manual_workflows/analysis-taint.md) | `scripts/analysis/taint.py` | done |
+| [`analysis-heap.md`](manual_workflows/analysis-heap.md) | `scripts/analysis/heap.py` | done |
+| [`analysis-crypto.md`](manual_workflows/analysis-crypto.md) | `scripts/analysis/crypto.py` | done |
+| [`analysis-obfuscation.md`](manual_workflows/analysis-obfuscation.md) | `scripts/analysis/obfuscation.py` | done |
+| [`analysis-chains.md`](manual_workflows/analysis-chains.md) | `scripts/analysis/chains.py` | done |
+| [`analysis-attack_surface.md`](manual_workflows/analysis-attack_surface.md) | `scripts/analysis/attack_surface.py` | done |
 
 ## Later-phase deliverables
 

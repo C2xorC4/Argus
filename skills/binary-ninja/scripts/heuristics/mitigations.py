@@ -181,15 +181,63 @@ def detect_fortify(bv) -> tuple[bool, list[str]]:
     return chk_present, unchecked
 
 
+def _is_elf_binary(bv) -> bool:
+    """FORTIFY is a glibc concept — only fire on ELF binaries.
+
+    `bv.view_type` is `"ELF"` on ELFs, `"PE"` on PE, `"Mach-O"` on
+    Mach-O. Tolerant fallback: assume non-ELF if attribute missing.
+    """
+    if bv is None:
+        return False
+    vt = str(getattr(bv, "view_type", "") or "").upper()
+    return "ELF" in vt
+
+
+def _is_userspace_elf(bv) -> bool:
+    """FORTIFY only applies to userspace glibc-linked binaries.
+
+    Kernel modules and freestanding ELFs link against the kernel /
+    no libc; the `__*_chk` symbols are never present (they're libc-
+    internal), so the heuristic produces FPs.
+
+    Discriminators (any one disqualifies):
+    - `bv.entry_point == 0` — relocatable ELFs (kernel `.ko`,
+      static archives, object files) have no entry point.
+    - Presence of typical kernel-module markers (`.modinfo`,
+      `__versions`, `.gnu.linkonce.this_module` sections).
+    """
+    if not _is_elf_binary(bv):
+        return False
+    # Heuristic 1: relocatable ELFs have no entry point
+    try:
+        if int(getattr(bv, "entry_point", 0) or 0) == 0:
+            return False
+    except Exception:
+        pass
+    # Heuristic 2: kernel-module section markers
+    sections = getattr(bv, "sections", None)
+    if sections:
+        names = set(sections.keys() if hasattr(sections, "keys") else [])
+        kernel_markers = {".modinfo", "__versions", ".gnu.linkonce.this_module"}
+        if names & kernel_markers:
+            return False
+    return True
+
+
 def match(bv, *, binary: str, arch: str, platform: str,
           detector: str = "heuristics.mitigations") -> list:
     """Emit a single Finding describing the binary's hardening posture
     when FORTIFY is missing on at least one banned-variant pair.
 
-    Header-based mitigation extraction (CFG/ASLR/CFI/etc.) lives in
-    `analysis/mitigations.py` because it needs raw PE/ELF parsing that
-    extends beyond the heuristics-module brief.
+    FORTIFY is a glibc-specific concept (the `__*_chk` family is in
+    glibc / libssp); applying it to PE / Mach-O produces false
+    positives. Skip non-ELF binaries.
+
+    Header-based mitigation extraction (CFG / ASLR / CFI / etc.) lives in
+    `analysis/mitigations.py`; that module handles every format.
     """
+    if not _is_userspace_elf(bv):
+        return []
     fortify_on, unchecked = detect_fortify(bv)
     if fortify_on or not unchecked:
         return []

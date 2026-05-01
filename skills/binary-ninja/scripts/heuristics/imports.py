@@ -126,6 +126,66 @@ SINKS: list[tuple[str, int, str]] = [
     ("VirtualAlloc", 1, "alloc_size"),
     ("operator new",      0, "alloc_size"),
     ("operator new[]",    0, "alloc_size"),
+
+    # ── Linux kernel — scatter-gather write at offset ────────────
+    # CVE-2026-31431 ("copy.fail") shape: scatterwalk_map_and_copy
+    # writes `nbytes` to a scatterlist at `start` offset. When start
+    # is attacker-controlled (e.g., assoclen + cryptlen from
+    # `struct aead_request *req` user-set fields) and the dst is
+    # chained via sg_chain() into page-cache pages, this is an
+    # OOB page-cache write.
+    ("scatterwalk_map_and_copy", 2, "kernel_oob_write"),
+    ("memcpy_to_iter",           1, "kernel_oob_write"),
+    ("copy_to_iter",             1, "kernel_oob_write"),
+
+    # ── Windows kernel — physical memory abuse / arbitrary R/W ──
+    # CVE-2021-21551 ("dbutil_2_3.sys") class: signed driver exposes
+    # IOCTL handlers that pass attacker-controlled data into the
+    # physical-memory mapping APIs, yielding arbitrary kernel R/W.
+    # The dangerous arg is the one that names a kernel address /
+    # physical address / MSR index / allocation size; tainted
+    # values there are the BYOVD primitive signature.
+    ("MmMapIoSpace",                          0, "kernel_arbitrary_rw"),
+    ("MmMapIoSpaceEx",                        0, "kernel_arbitrary_rw"),
+    ("MmGetPhysicalAddress",                  0, "kernel_phys_disclosure"),
+    ("MmAllocateContiguousMemorySpecifyCache", 0, "kernel_alloc_size"),
+    ("MmAllocateContiguousMemory",            0, "kernel_alloc_size"),
+    ("ZwMapViewOfSection",                    2, "kernel_arbitrary_rw"),
+    ("NtMapViewOfSection",                    2, "kernel_arbitrary_rw"),
+    ("__writemsr",                            0, "kernel_msr_write"),
+    ("__readmsr",                             0, "kernel_msr_read"),
+    # Kernel `RtlCopyMemory` / `memcpy` are listed under
+    # buffer_overflow above; the Windows-kernel path uses the same
+    # symbol names. The taint analyzer applies kernel-context
+    # severity escalation when the binary is a kernel driver.
+
+    # ── Windows kernel — process-handle abuse / arbitrary process termination ──
+    # BYOVD process-killer class — signed driver exposes IOCTL handlers
+    # that take an attacker-controlled PID, open a handle to the
+    # target process via `Zw/NtOpenProcess`, then call
+    # `Zw/NtTerminateProcess`. Used universally to disable AV/EDR
+    # agents from user-mode (the "EDR killer" pattern).
+    # The dangerous arg for OpenProcess family is the CLIENT_ID at
+    # arg index 3 (PID lives in `CLIENT_ID.UniqueProcess`); for
+    # TerminateProcess it's the handle (arg 0) — fired by tainted
+    # propagation through the OpenProcess→handle→TerminateProcess
+    # chain rather than direct PID-to-Terminate flow.
+    ("ZwOpenProcess",                         3, "kernel_arbitrary_process_handle"),
+    ("NtOpenProcess",                         3, "kernel_arbitrary_process_handle"),
+    ("ZwTerminateProcess",                    0, "kernel_arbitrary_process_terminate"),
+    ("NtTerminateProcess",                    0, "kernel_arbitrary_process_terminate"),
+    ("PsLookupProcessByProcessId",            0, "kernel_arbitrary_process_handle"),
+    # File overwrite class — signed driver exposes IOCTL that
+    # takes attacker-controlled file path + bytes; used to overwrite
+    # AV signature files / drop persistence payloads.
+    ("ZwCreateFile",                          2, "kernel_arbitrary_file_open"),
+    ("NtCreateFile",                          2, "kernel_arbitrary_file_open"),
+    ("ZwWriteFile",                           5, "kernel_arbitrary_file_write"),
+    ("NtWriteFile",                           5, "kernel_arbitrary_file_write"),
+    # Registry-persistence class — signed driver writes registry
+    # keys on behalf of attacker (kernel-mode bypass of access checks).
+    ("ZwSetValueKey",                         1, "kernel_arbitrary_registry_write"),
+    ("NtSetValueKey",                         1, "kernel_arbitrary_registry_write"),
 ]
 
 

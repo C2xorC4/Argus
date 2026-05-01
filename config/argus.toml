@@ -84,3 +84,16 @@ report_out  = "out/reports"
 max_seconds_per_stage     = 600
 max_findings_per_run      = 1000
 binja_analysis_timeout_s  = 300
+
+[lab_target]
+# Remote test-target host accessed via SSH. Used by dev tools that
+# need to interact with a Linux VM/host (kernel module extraction,
+# PoC trigger, sanitizer-instrumented runs, KASAN log capture).
+#
+# Per-host details belong in config/argus.local.toml. The committed
+# default is empty so the dev tools fail loudly when called against
+# an unconfigured target.
+ssh_alias        = ""        # e.g., "argus-lab" — must match a Host entry in ~/.ssh/config
+description      = ""        # e.g., "Proxmox VM, Ubuntu 24.04 + 6.17.0-1007-aws kernel"
+default_workdir  = "~/argus" # remote scratch directory the dev tools write to
+require_confirm_destructive = true   # operator-confirm gate on rmmod/modprobe/dd/etc.

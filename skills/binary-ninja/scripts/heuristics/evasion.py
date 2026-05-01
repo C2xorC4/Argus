@@ -21,7 +21,7 @@ from __future__ import annotations
 from ._base import (
     BytePattern, ImportPattern, Pattern, StringPattern, StructuralPattern,
     emit_finding, find_byte_pattern, function_at, imports_in,
-    section_at, strings_in,
+    section_at, string_pattern_match, strings_in,
 )
 from ..output.finding import Severity
 
@@ -84,6 +84,7 @@ PEB_ANTIDEBUG_STRINGS = StringPattern(
         "ProcessDebugObjectHandle", "ProcessDebugPort",
         "HeapValidate", "CheckRemoteDebuggerPresent",
     ],
+    word_boundary=True,
 )
 
 PEB_ANTIDEBUG_IMPORTS = ImportPattern(
@@ -122,13 +123,14 @@ NTDLL_UNHOOK = ImportPattern(
 
 NTDLL_DLL_STRING = StringPattern(
     name="evasion.ntdll_dll_string",
-    description="`ntdll.dll` string in binary — context for hook-evasion when paired with re-map imports",
+    description="`ntdll.dll` string in binary — combo signal with NTDLL_UNHOOK imports",
     severity=Severity.LOW,
     category="ntdll_string_marker",
     mitre_attack=["T1027"],
     knowledge_refs=["[[Memory/Knowledge/em_hook_evasion_three_approaches]]"],
     string_literals=["ntdll.dll", "NTDLL.DLL"],
     case_sensitive=False,
+    notes="combo_only: only emit when NTDLL_UNHOOK combo also fires",
 )
 
 
@@ -166,6 +168,7 @@ ANTI_CHEAT_STRINGS = StringPattern(
         "GameGuard", "npggsvc", "INCA",
         "Hyperion", "PunkBuster",
     ],
+    word_boundary=True,                  # short tokens (EAC, VAC, INCA) need \b\b
 )
 
 ANALYSIS_TOOL_STRINGS = StringPattern(
@@ -181,6 +184,7 @@ ANALYSIS_TOOL_STRINGS = StringPattern(
         "VBoxService", "vmtoolsd", "vmware",
         "qemu-ga",
     ],
+    word_boundary=True,
 )
 
 
@@ -215,15 +219,39 @@ PATTERNS: list[Pattern] = [
 ]
 
 
+def _string_hits(pat: StringPattern, string_table) -> list[tuple[str, int]]:
+    """Return [(literal, addr), ...] for every literal in `pat.string_literals`
+    that matches at least one string in `string_table`, anchoring at the
+    first matching string's address per literal."""
+    out: list[tuple[str, int]] = []
+    for needle in pat.string_literals:
+        for value, addr in string_table:
+            if string_pattern_match(needle, value,
+                                    case_sensitive=pat.case_sensitive,
+                                    word_boundary=pat.word_boundary):
+                out.append((needle, addr))
+                break
+    return out
+
+
 def match(bv, *, binary: str, arch: str, platform: str,
           detector: str = "heuristics.evasion") -> list:
     findings = []
     imports = imports_in(bv)
     string_table = strings_in(bv)
-    string_values = {v for v, _ in string_table}
+
+    ntdll_unhook_combo_present = all(n in imports for n in NTDLL_UNHOOK.import_names)
+
+    # PEB_ANTIDEBUG_IMPORTS combo-gate: stand-alone presence of
+    # `IsDebuggerPresent`/`OutputDebugString*` is in nearly every Win32
+    # binary (system utilities, runtime libraries). Require co-presence
+    # of PEB-field strings for emission.
+    peb_string_hits = _string_hits(PEB_ANTIDEBUG_STRINGS, string_table)
 
     # Import-based patterns
     for pat in (VEH_HANDLER, HIDDEN_THREAD, PEB_ANTIDEBUG_IMPORTS, NTDLL_UNHOOK):
+        if pat is PEB_ANTIDEBUG_IMPORTS and not peb_string_hits:
+            continue       # combo_only — no PEB string co-signal -> suppress
         names = pat.import_names
         if pat.all_required:
             if not all(n in imports for n in names):
@@ -243,36 +271,26 @@ def match(bv, *, binary: str, arch: str, platform: str,
             details={"matched_imports": names if pat.all_required else hits},
         ))
 
-    # String-based patterns
+    # String-based patterns — NTDLL_DLL_STRING is combo-gated.
     for pat in (PEB_ANTIDEBUG_STRINGS, ANTI_CHEAT_STRINGS,
                 ANALYSIS_TOOL_STRINGS, NTDLL_DLL_STRING):
-        compare_set = string_values
-        if not pat.case_sensitive:
-            compare_set = {v.lower() for v in string_values}
-            literals = [s.lower() for s in pat.string_literals]
-        else:
-            literals = pat.string_literals
-        hits = [needle for needle in literals
-                if any(needle in s for s in compare_set)]
+        if pat is NTDLL_DLL_STRING and not ntdll_unhook_combo_present:
+            continue                     # combo_only — no NTDLL_UNHOOK imports → suppress
+
+        hits = _string_hits(pat, string_table)
         if not hits:
             continue
-        # Anchor at first matching string's address
-        first_addr = next(
-            (a for v, a in string_table
-             if any(needle in (v if pat.case_sensitive else v.lower())
-                    for needle in literals)),
-            0,
-        )
+        first_addr = hits[0][1]
         findings.append(emit_finding(
             pat,
             address=first_addr, function="<binary>",
             binary=binary, arch=arch, platform=platform,
             detector=detector,
-            description_extra=f"strings: {', '.join(hits[:8])}",
-            details={"matched_strings": hits[:32]},
+            description_extra=f"strings: {', '.join(h for h, _ in hits[:8])}",
+            details={"matched_strings": [h for h, _ in hits[:32]]},
         ))
 
-    # Structural patterns — emitted by analysis modules; here we just
+    # Structural patterns — emitted by analysis modules; here we only
     # surface the metadata so callers can include the patterns in
     # downstream reasoning.
 

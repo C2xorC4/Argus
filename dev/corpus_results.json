@@ -1,0 +1,593 @@
+{
+  "results": [
+    {
+      "cell": "apc-injection\\c",
+      "vuln_class": "apc-injection",
+      "language": "c",
+      "build_time_s": 0.57,
+      "argus_time_s": 4.12,
+      "argus_emitted": 3,
+      "argus_tp": [
+        "apc_injection"
+      ],
+      "argus_fn": [],
+      "argus_fp": [
+        "apc_injection_local",
+        "peb_antidebug_check"
+      ],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "api-hash-resolution\\c",
+      "vuln_class": "api-hash-resolution",
+      "language": "c",
+      "build_time_s": 0.59,
+      "argus_time_s": 2.11,
+      "argus_emitted": 1,
+      "argus_tp": [
+        "api_hash_resolution"
+      ],
+      "argus_fn": [],
+      "argus_fp": [],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "command-injection\\c",
+      "vuln_class": "command-injection",
+      "language": "c",
+      "build_time_s": 0.13,
+      "argus_time_s": 2.06,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "command_injection"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "command-injection\\cpp",
+      "vuln_class": "command-injection",
+      "language": "cpp",
+      "build_time_s": 0.32,
+      "argus_time_s": 1.48,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "command_injection"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 5
+    },
+    {
+      "cell": "direct-syscall\\c",
+      "vuln_class": "direct-syscall",
+      "language": "c",
+      "build_time_s": 0.6,
+      "argus_time_s": 1.91,
+      "argus_emitted": 2,
+      "argus_tp": [],
+      "argus_fn": [
+        "direct_syscall_stub"
+      ],
+      "argus_fp": [
+        "ntdll_function_string",
+        "ssn_resolution_helpers"
+      ],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "double-free\\c",
+      "vuln_class": "double-free",
+      "language": "c",
+      "build_time_s": 0.14,
+      "argus_time_s": 0.92,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "double_free"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "double-free\\cpp",
+      "vuln_class": "double-free",
+      "language": "cpp",
+      "build_time_s": 0.34,
+      "argus_time_s": 1.25,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "double_free"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "format-string\\c",
+      "vuln_class": "format-string",
+      "language": "c",
+      "build_time_s": 0.13,
+      "argus_time_s": 1.73,
+      "argus_emitted": 1,
+      "argus_tp": [
+        "format_string"
+      ],
+      "argus_fn": [],
+      "argus_fp": [],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "format-string\\cpp",
+      "vuln_class": "format-string",
+      "language": "cpp",
+      "build_time_s": 0.34,
+      "argus_time_s": 2.36,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "format_string"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 5
+    },
+    {
+      "cell": "heap-overflow\\c",
+      "vuln_class": "heap-overflow",
+      "language": "c",
+      "build_time_s": 0.13,
+      "argus_time_s": 1.85,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "heap_buffer_overflow"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "heap-overflow\\cpp",
+      "vuln_class": "heap-overflow",
+      "language": "cpp",
+      "build_time_s": 0.3,
+      "argus_time_s": 0.57,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "heap_buffer_overflow"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "hidden-thread\\c",
+      "vuln_class": "hidden-thread",
+      "language": "c",
+      "build_time_s": 0.61,
+      "argus_time_s": 0.46,
+      "argus_emitted": 2,
+      "argus_tp": [],
+      "argus_fn": [
+        "hidden_from_debugger_thread"
+      ],
+      "argus_fp": [
+        "ntdll_function_string",
+        "ssn_resolution_helpers"
+      ],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "integer-overflow\\c",
+      "vuln_class": "integer-overflow",
+      "language": "c",
+      "build_time_s": 0.12,
+      "argus_time_s": 0.45,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "integer_overflow_to_allocation"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "integer-overflow\\cpp",
+      "vuln_class": "integer-overflow",
+      "language": "cpp",
+      "build_time_s": 0.29,
+      "argus_time_s": 0.48,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "integer_overflow_to_allocation"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "lcg-xor-cipher\\c",
+      "vuln_class": "lcg-xor-cipher",
+      "language": "c",
+      "build_time_s": 0.12,
+      "argus_time_s": 0.99,
+      "argus_emitted": 6,
+      "argus_tp": [],
+      "argus_fn": [
+        "lcg_xor_string_cipher"
+      ],
+      "argus_fp": [
+        "lcg_constants",
+        "lcg_xor_cipher"
+      ],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "lcg-xor-cipher\\cpp",
+      "vuln_class": "lcg-xor-cipher",
+      "language": "cpp",
+      "build_time_s": 0.3,
+      "argus_time_s": 0.58,
+      "argus_emitted": 6,
+      "argus_tp": [],
+      "argus_fn": [
+        "lcg_xor_string_cipher"
+      ],
+      "argus_fp": [
+        "lcg_constants",
+        "lcg_xor_cipher"
+      ],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "null-dacl\\c",
+      "vuln_class": "null-dacl",
+      "language": "c",
+      "build_time_s": 0.62,
+      "argus_time_s": 1.04,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "null_dacl"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 5
+    },
+    {
+      "cell": "off-by-one\\c",
+      "vuln_class": "off-by-one",
+      "language": "c",
+      "build_time_s": 0.13,
+      "argus_time_s": 1.04,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "off_by_one"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 5
+    },
+    {
+      "cell": "off-by-one\\cpp",
+      "vuln_class": "off-by-one",
+      "language": "cpp",
+      "build_time_s": 0.32,
+      "argus_time_s": 0.61,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "off_by_one"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "path-traversal\\c",
+      "vuln_class": "path-traversal",
+      "language": "c",
+      "build_time_s": 0.13,
+      "argus_time_s": 1.04,
+      "argus_emitted": 3,
+      "argus_tp": [],
+      "argus_fn": [
+        "path_traversal"
+      ],
+      "argus_fp": [
+        "attack_surface_entry",
+        "entry_reaches_sink"
+      ],
+      "legacy_emitted": 5
+    },
+    {
+      "cell": "path-traversal\\cpp",
+      "vuln_class": "path-traversal",
+      "language": "cpp",
+      "build_time_s": 0.62,
+      "argus_time_s": 2.12,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "path_traversal"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "permissive-sddl\\c",
+      "vuln_class": "permissive-sddl",
+      "language": "c",
+      "build_time_s": 0.64,
+      "argus_time_s": 2.19,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "permissive_sddl"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 5
+    },
+    {
+      "cell": "pre-verify-write\\c",
+      "vuln_class": "pre-verify-write",
+      "language": "c",
+      "build_time_s": 0.72,
+      "argus_time_s": 1.18,
+      "argus_emitted": 1,
+      "argus_tp": [],
+      "argus_fn": [
+        "pre_verification_write"
+      ],
+      "argus_fp": [
+        "path_traversal"
+      ],
+      "legacy_emitted": 5
+    },
+    {
+      "cell": "prng-security-path\\c",
+      "vuln_class": "prng-security-path",
+      "language": "c",
+      "build_time_s": 0.14,
+      "argus_time_s": 1.07,
+      "argus_emitted": 5,
+      "argus_tp": [],
+      "argus_fn": [
+        "weak_prng_in_security_path"
+      ],
+      "argus_fp": [
+        "csprng_absent",
+        "hardcoded_weak_key",
+        "non_csprng_use"
+      ],
+      "legacy_emitted": 8
+    },
+    {
+      "cell": "prng-security-path\\cpp",
+      "vuln_class": "prng-security-path",
+      "language": "cpp",
+      "build_time_s": 0.45,
+      "argus_time_s": 0.64,
+      "argus_emitted": 4,
+      "argus_tp": [],
+      "argus_fn": [
+        "weak_prng_in_security_path"
+      ],
+      "argus_fp": [
+        "hardcoded_weak_key",
+        "mt19937_use"
+      ],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "seh-veh-abuse\\c",
+      "build_failed": true
+    },
+    {
+      "cell": "stack-overflow\\c",
+      "vuln_class": "stack-overflow",
+      "language": "c",
+      "build_time_s": 0.12,
+      "argus_time_s": 1.08,
+      "argus_emitted": 2,
+      "argus_tp": [
+        "stack_buffer_overflow"
+      ],
+      "argus_fn": [],
+      "argus_fp": [
+        "banned_function"
+      ],
+      "legacy_emitted": 8
+    },
+    {
+      "cell": "stack-overflow\\cpp",
+      "vuln_class": "stack-overflow",
+      "language": "cpp",
+      "build_time_s": 0.34,
+      "argus_time_s": 0.56,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "stack_buffer_overflow"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "tls-callback\\c",
+      "vuln_class": "tls-callback",
+      "language": "c",
+      "build_time_s": 0.61,
+      "argus_time_s": 2.11,
+      "argus_emitted": 1,
+      "argus_tp": [],
+      "argus_fn": [
+        "tls_callback_first_stage"
+      ],
+      "argus_fp": [
+        "peb_antidebug_check"
+      ],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "toctou\\c",
+      "vuln_class": "toctou",
+      "language": "c",
+      "build_time_s": 0.14,
+      "argus_time_s": 1.95,
+      "argus_emitted": 3,
+      "argus_tp": [],
+      "argus_fn": [
+        "toctou"
+      ],
+      "argus_fp": [
+        "attack_surface_entry",
+        "entry_reaches_sink",
+        "path_traversal"
+      ],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "toctou\\cpp",
+      "vuln_class": "toctou",
+      "language": "cpp",
+      "build_time_s": 0.62,
+      "argus_time_s": 1.6,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "toctou"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "type-confusion\\c",
+      "vuln_class": "type-confusion",
+      "language": "c",
+      "build_time_s": 0.13,
+      "argus_time_s": 1.02,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "type_confusion"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 6
+    },
+    {
+      "cell": "type-confusion\\cpp",
+      "vuln_class": "type-confusion",
+      "language": "cpp",
+      "build_time_s": 0.35,
+      "argus_time_s": 0.63,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "type_confusion"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "uninit-mem-disclosure\\c",
+      "vuln_class": "uninit-mem-disclosure",
+      "language": "c",
+      "build_time_s": 0.12,
+      "argus_time_s": 0.42,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "uninitialised_memory_disclosure"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "uninit-mem-disclosure\\cpp",
+      "vuln_class": "uninit-mem-disclosure",
+      "language": "cpp",
+      "build_time_s": 0.3,
+      "argus_time_s": 0.47,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "uninitialised_memory_disclosure"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    },
+    {
+      "cell": "use-after-free\\c",
+      "vuln_class": "use-after-free",
+      "language": "c",
+      "build_time_s": 0.12,
+      "argus_time_s": 1.0,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "use_after_free"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 7
+    },
+    {
+      "cell": "use-after-free\\cpp",
+      "vuln_class": "use-after-free",
+      "language": "cpp",
+      "build_time_s": 0.33,
+      "argus_time_s": 1.07,
+      "argus_emitted": 0,
+      "argus_tp": [],
+      "argus_fn": [
+        "use_after_free"
+      ],
+      "argus_fp": [],
+      "legacy_emitted": 4
+    }
+  ],
+  "aggregate": {
+    "tp": {
+      "apc_injection": 1,
+      "api_hash_resolution": 1,
+      "format_string": 1,
+      "stack_buffer_overflow": 1
+    },
+    "fn": {
+      "command_injection": 2,
+      "direct_syscall_stub": 1,
+      "double_free": 2,
+      "format_string": 1,
+      "heap_buffer_overflow": 2,
+      "hidden_from_debugger_thread": 1,
+      "integer_overflow_to_allocation": 2,
+      "lcg_xor_string_cipher": 2,
+      "null_dacl": 1,
+      "off_by_one": 2,
+      "path_traversal": 2,
+      "permissive_sddl": 1,
+      "pre_verification_write": 1,
+      "weak_prng_in_security_path": 2,
+      "stack_buffer_overflow": 1,
+      "tls_callback_first_stage": 1,
+      "toctou": 2,
+      "type_confusion": 2,
+      "uninitialised_memory_disclosure": 2,
+      "use_after_free": 2
+    },
+    "fp": {
+      "apc_injection_local": 1,
+      "peb_antidebug_check": 2,
+      "ntdll_function_string": 2,
+      "ssn_resolution_helpers": 2,
+      "lcg_constants": 2,
+      "lcg_xor_cipher": 2,
+      "attack_surface_entry": 2,
+      "entry_reaches_sink": 2,
+      "path_traversal": 2,
+      "csprng_absent": 1,
+      "hardcoded_weak_key": 2,
+      "non_csprng_use": 1,
+      "mt19937_use": 1,
+      "banned_function": 1
+    }
+  }
+}

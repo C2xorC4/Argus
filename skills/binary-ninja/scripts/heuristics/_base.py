@@ -29,11 +29,31 @@ Conventions:
 
 from __future__ import annotations
 
+import re
 import struct
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 from ..output.finding import Evidence, Finding, Severity
+
+
+# ─────────────────────────────────────────────────────────────────
+# String-match helper used by every StringPattern consumer.
+# Honours `case_sensitive` and `word_boundary` flags.
+# ─────────────────────────────────────────────────────────────────
+
+
+def string_pattern_match(needle: str, haystack: str,
+                         *, case_sensitive: bool = True,
+                         word_boundary: bool = False) -> bool:
+    """Return True if `haystack` contains `needle` per the pattern flags."""
+    if word_boundary:
+        flags = 0 if case_sensitive else re.IGNORECASE
+        return bool(re.search(r"\b" + re.escape(needle) + r"\b",
+                              haystack, flags))
+    if case_sensitive:
+        return needle in haystack
+    return needle.lower() in haystack.lower()
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -76,6 +96,7 @@ class StringPattern(Pattern):
 
     string_literals: list[str] = field(default_factory=list)
     case_sensitive: bool = True
+    word_boundary: bool = False           # require \b...\b around the literal
 
 
 @dataclass
@@ -137,29 +158,39 @@ class ChainPattern(Pattern):
 
 
 def imports_in(bv) -> set[str]:
-    """Return the set of imported symbol names."""
+    """Return the set of imported / externally-resolved symbol names.
+
+    Covers both userspace import-table entries (`ImportedFunctionSymbol`)
+    and kernel-module / static-archive external references
+    (`ExternalSymbol`). Kernel `.ko` files reference kernel-core
+    functions via the ExternalSymbol mechanism, not import-table —
+    treating both shapes as "imports" lets the same heuristics layer
+    work across user-mode and kernel binaries.
+    """
     out: set[str] = set()
     if bv is None:
         return out
-    # Try Binja's typed accessor first.
+    # Try Binja's typed accessor for both relevant symbol kinds.
     get_typed = getattr(bv, "get_symbols_of_type", None)
     if callable(get_typed):
-        try:
-            # Avoid a hard import on binaryninja.SymbolType — pass the string.
-            for sym in get_typed("ImportedFunctionSymbol"):
-                name = getattr(sym, "short_name", None) or getattr(sym, "name", None)
-                if name:
-                    out.add(str(name))
-            if out:
-                return out
-        except Exception:
-            pass
+        for type_name in ("ImportedFunctionSymbol", "ExternalSymbol",
+                          "ImportAddressSymbol", "ImportedDataSymbol"):
+            try:
+                for sym in get_typed(type_name):
+                    name = getattr(sym, "short_name", None) or getattr(sym, "name", None)
+                    if name:
+                        out.add(str(name))
+            except Exception:
+                continue
+        if out:
+            return out
     # Fallback: iterate all symbols and filter.
     syms = getattr(bv, "symbols", None) or []
     try:
         for sym in syms:
             type_name = str(getattr(sym, "type", ""))
-            if "Imported" in type_name and ("Function" in type_name or "External" in type_name):
+            if (("Imported" in type_name and ("Function" in type_name or "Data" in type_name))
+                    or "External" in type_name):
                 name = getattr(sym, "short_name", None) or getattr(sym, "name", None)
                 if name:
                     out.add(str(name))

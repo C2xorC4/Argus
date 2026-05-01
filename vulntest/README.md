@@ -1,6 +1,6 @@
 # Argus VulnTest Corpus
 
-Three-tier mini-CTF / quality-gate substrate for the Argus
+Multi-tier quality-gate substrate for the Argus
 toolchain.
 
 ## Purpose

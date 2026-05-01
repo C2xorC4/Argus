@@ -54,6 +54,7 @@ The Knowledge-to-module mapping (Phase 1.1):
 
 from . import (
     arch,
+    byovd_primitives,
     chains,
     crypto,
     evasion,
@@ -90,6 +91,7 @@ ALL_MODULES = (
     injection,
     evasion,
     rootkit,
+    byovd_primitives,
     crypto,
     mitigations,
     obfuscation,

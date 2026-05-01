@@ -282,18 +282,26 @@ def match(bv, *, binary: str, arch: str, platform: str,
                         description_extra=f"{hits_label} constant 0x{c:x}",
                     ))
 
-    # 4. Resolution-helper imports — emit only as a low-confidence
-    #    binary-level signal (combo logic is in analysis/taint.py).
+    # 4. Resolution-helper imports — combo-gated. GetProcAddress +
+    #    GetModuleHandle is in 99% of Win32 binaries; alone it's
+    #    noise. Emit only when paired with NTDLL function-name
+    #    strings (the resolution targets) OR with the Hell's Gate
+    #    stub byte pattern.
     imps = imports_in(bv)
     matched = [n for n in SSN_RESOLUTION_HELPERS.import_names if n in imps]
-    if len(matched) >= 2:
+    if len(matched) >= 2 and nt_hits:
         findings.append(emit_finding(
             SSN_RESOLUTION_HELPERS,
             address=0, function="<binary>",
             binary=binary, arch=arch, platform=platform,
             detector=detector,
-            description_extra=f"helpers: {', '.join(matched)}",
-            details={"matched_helpers": matched},
+            description_extra=(
+                f"helpers: {', '.join(matched)} (combo: NTDLL strings present)"
+            ),
+            details={
+                "matched_helpers": matched,
+                "ntdll_string_hits": len(nt_hits),
+            },
         ))
 
     return findings

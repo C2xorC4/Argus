@@ -58,6 +58,65 @@ vulntest/private/
 *.bnpkg
 .binaryninja/
 
+# ── Known-positive cell artefacts pulled from upstream ──────────
+# Source / PoC / binary content pulled from upstream projects
+# (Linux kernel — GPL-2.0; theori-io PoC repo — no licence) is
+# fetched locally for testing but NOT redistributed. Each cell
+# keeps its own metadata (README.md / expected.json / remediation/)
+# under version control; the upstream-fetched content is gitignored
+# and re-pulled on demand via dev/pull_known_positive_sources.sh.
+
+# Source files pulled from upstream (kernel, libraries, etc.)
+vulntest/known-positive/**/source/*.c
+vulntest/known-positive/**/source/*.cpp
+vulntest/known-positive/**/source/*.cc
+vulntest/known-positive/**/source/*.h
+vulntest/known-positive/**/source/*.hpp
+vulntest/known-positive/**/source/*.rs
+vulntest/known-positive/**/source/*.go
+
+# Source repos cloned from upstream — `_<variant>/` subdirs (mirroring
+# the poc/_*/ convention) are upstream clone slots and ignored.
+vulntest/known-positive/**/source/_*/
+
+# PoC repos / scripts cloned from upstream — any `_<variant>/` subdir
+# is treated as an upstream clone slot and ignored.
+vulntest/known-positive/**/poc/_*/
+vulntest/known-positive/**/poc/*.py
+vulntest/known-positive/**/poc/*.sh
+vulntest/known-positive/**/poc/*.c
+vulntest/known-positive/**/poc/*.bin
+
+# Live binaries (.ko / vmlinuz / .sys / System.map extracted from
+# distros / vendors). Each cell's `binary/` is operator-supplied and
+# never redistributed — proprietary kernel drivers (Dell's
+# dbutil_2_3.sys etc.) and GPL-licensed kernel modules alike must
+# stay out of the source tree.
+vulntest/known-positive/**/binary/*.ko
+vulntest/known-positive/**/binary/*.so
+vulntest/known-positive/**/binary/*.sys
+vulntest/known-positive/**/binary/*.dll
+vulntest/known-positive/**/binary/*.exe
+vulntest/known-positive/**/binary/vmlinuz*
+vulntest/known-positive/**/binary/System.map*
+vulntest/known-positive/**/binary/*.elf
+vulntest/known-positive/**/binary/*.efi
+
+# Keep our metadata (README.md, expected.json, etc.) tracked
+!vulntest/known-positive/**/README.md
+!vulntest/known-positive/**/expected.json
+!vulntest/known-positive/**/verification.json
+!vulntest/known-positive/**/binary/README.md
+!vulntest/known-positive/**/source/README.md
+!vulntest/known-positive/**/poc/README.md
+!vulntest/known-positive/**/remediation/README.md
+!vulntest/known-positive/**/probe/
+
+# Per-run Phase-4 verification logs — generated continuously, would
+# pile up in the repo. The verification plan itself is committed;
+# per-cycle logs are excluded.
+vulntest/known-positive/**/verification.run.*.json
+
 # ── SARIF / report outputs ──────────────────────────────────────
 *.sarif
 reports/

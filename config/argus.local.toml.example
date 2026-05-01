@@ -55,3 +55,15 @@
 # [budgets]
 # max_seconds_per_stage    = 1800
 # binja_analysis_timeout_s = 900
+
+# ── Lab target (SSH) ─────────────────────────────────────────────
+# Configured per host because the SSH alias is environmental.
+# Set the ssh_alias to match a `Host` entry in your ~/.ssh/config.
+# Argus's dev tools (dev/lab_run.sh, future Phase-4 verification
+# helpers) read this and route SSH commands accordingly.
+#
+# [lab_target]
+# ssh_alias       = "argus-lab"
+# description     = "Proxmox Ubuntu 24.04 + linux-image-6.17.0-1007-aws"
+# default_workdir = "~/argus"
+# require_confirm_destructive = true
