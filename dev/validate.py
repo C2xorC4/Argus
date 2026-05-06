@@ -27,8 +27,9 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from scripts.lib import BinjaSession, load_config                    # noqa: E402
 from scripts.analysis import (                                       # noqa: E402
-    crypto, heap, mitigations, obfuscation, source_surface, surface,
-    taint, windows_drivers,
+    crypto, heap, integrity_check_order, mitigations, obfuscation,
+    race, sddl, source_surface, surface, taint, types, uninit,
+    windows_drivers,
 )
 
 
@@ -147,10 +148,57 @@ def validate_one(path: Path) -> dict:
         print(f"  windrv:  {result['windrv_time_s']}s")
         _summarise(wd_findings, "windows-driver findings")
 
+        # Tier-2 detectors (Run 16): uninit-mem, type-confusion-candidate, TOCTOU.
+        # Each is independent of taint/heap and runs cheaply.
+        t7 = time.time()
+        uninit_findings = uninit.analyze(session, binary=str(path),
+                                         arch=result["arch"], platform=result["platform"])
+        result["uninit_time_s"] = round(time.time() - t7, 2)
+        result["uninit_findings"] = len(uninit_findings)
+        print(f"  uninit:  {result['uninit_time_s']}s")
+        _summarise(uninit_findings, "uninit findings")
+
+        t8 = time.time()
+        types_findings = types.analyze(session, binary=str(path),
+                                       arch=result["arch"], platform=result["platform"])
+        result["types_time_s"] = round(time.time() - t8, 2)
+        result["types_findings"] = len(types_findings)
+        print(f"  types:   {result['types_time_s']}s")
+        _summarise(types_findings, "type-confusion findings")
+
+        t9 = time.time()
+        race_findings = race.analyze(session, binary=str(path),
+                                     arch=result["arch"], platform=result["platform"])
+        result["race_time_s"] = round(time.time() - t9, 2)
+        result["race_findings"] = len(race_findings)
+        print(f"  race:    {result['race_time_s']}s")
+        _summarise(race_findings, "TOCTOU findings")
+
+        # Run-17 detectors: Plan A (SDDL/ACE), Plan B (write-then-verify).
+        t10 = time.time()
+        sddl_findings = sddl.analyze(session, binary=str(path),
+                                     arch=result["arch"], platform=result["platform"])
+        result["sddl_time_s"] = round(time.time() - t10, 2)
+        result["sddl_findings"] = len(sddl_findings)
+        print(f"  sddl:    {result['sddl_time_s']}s")
+        _summarise(sddl_findings, "SDDL/ACE findings")
+
+        t11 = time.time()
+        ico_findings = integrity_check_order.analyze(
+            session, binary=str(path),
+            arch=result["arch"], platform=result["platform"])
+        result["ico_time_s"] = round(time.time() - t11, 2)
+        result["ico_findings"] = len(ico_findings)
+        print(f"  ico:     {result['ico_time_s']}s")
+        _summarise(ico_findings, "pre-verify-write findings")
+
         all_findings = (list(surf_findings) + list(src_findings)
                         + list(taint_findings)
                         + list(heap_findings) + list(crypto_findings)
-                        + list(obf_findings) + list(wd_findings))
+                        + list(obf_findings) + list(wd_findings)
+                        + list(uninit_findings) + list(types_findings)
+                        + list(race_findings) + list(sddl_findings)
+                        + list(ico_findings))
         result["total_findings"] = len(all_findings)
         result["total_time_s"] = round(time.time() - t0, 2)
 

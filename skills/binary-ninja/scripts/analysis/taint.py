@@ -30,9 +30,232 @@ from typing import Optional
 
 from ..heuristics import imports as heur_imports
 from ..heuristics._base import imports_in
+from ..lib.scoring import apply_signals_to_finding
 from ..output.finding import Evidence, Finding, Severity
+from . import _cfg_primitives as cfg
 from . import _il_helpers as ilh
 from . import mitigations as mitigations_mod
+
+
+# ─────────────────────────────────────────────────────────────────
+# Sink-class → signal mapping
+# ─────────────────────────────────────────────────────────────────
+#
+# Each sink class declares the signals that anchor its findings.
+# Detectors call `apply_signals_to_finding` after constructing the
+# Finding to compute fan-discount-aware confidence. Sink classes not
+# listed here fall back to neutral confidence (0.5).
+#
+# Some sink classes additionally augment their signals based on CFG
+# context (see `_augment_signals_for_sink` below) — e.g., the
+# integer-OF class adds a SPECIFIC `missing_alloc_size_guard_dominator`
+# signal when no comparison on the tainted size dominates the alloc
+# call site. This is the daydream-surfaced design choice for Tier 2
+# #2: detect the *absence* of the guard, not the *presence* of the
+# overflow expression — compilers can dead-code-eliminate the
+# present-but-redundant guard under signed-OF UB.
+#
+# As Tier 2 detectors are rebuilt with their own substrate (stack.py,
+# types.py, race.py), the signal mappings here will move to those
+# modules and become richer (per-finding signal sets, not per-sink-
+# class).
+
+_SINK_CLASS_SIGNALS: dict[str, tuple[str, ...]] = {
+    "format_string":    ("tainted_format_arg",),
+    "alloc_size":       ("tainted_size_arg",),         # HUB; specific added below
+    "buffer_overflow":  ("tainted_pointer_write",),    # HUB; specific added below
+}
+
+
+# Unbounded copy-class sinks — strcpy/strcat/sprintf-family. Bounded
+# copies (memcpy/strncpy/snprintf with explicit length) are NOT in
+# this set; they get HUB only unless len-arg analysis proves the
+# write size is uncontrolled.
+_UNBOUNDED_COPY_SINKS: frozenset[str] = frozenset({
+    "strcpy", "stpcpy", "strcat",
+    "wcscpy", "wcscat",
+    "lstrcpyA", "lstrcpyW", "lstrcatA", "lstrcatW",
+    "sprintf", "vsprintf",
+})
+
+
+def _cpp_stdlib_propagator_for_name(name: str) -> Optional[list[tuple[int, int]]]:
+    """Pattern-match a callee's demangled short_name against known
+    C++ stdlib propagators; return `[(src_arg_idx, dst_arg_idx), ...]`
+    or None.
+
+    Covers std::basic_string ctor from const char* (taint flows arg 1
+    → arg 0 = this) and std::vector ctor from range. Template
+    parameters in the demangled name are tolerated.
+
+    Limitation — memory-region taint not modelled. The propagator
+    marks the this-ptr SSA var as tainted, but for std::string-
+    mediated flows the taint is in the *memory* the this-ptr
+    addresses (the string's internal buffer), not in the SSA var.
+    Subsequent code that takes a fresh `&stack_var` to load from the
+    same memory gets a fresh SSA var — taint doesn't transfer. End-
+    to-end propagation through `std::string ctor → log_message(...)
+    → c_str() → printf(...)` requires stack-region taint, which is
+    a v3-class enhancement beyond simple propagator tables.
+
+    Concretely: this propagator fires correctly when the tainted
+    value is consumed directly (e.g., `size_t n = strtoull(argv[1])`
+    flowing into a C++ `alloc_records(n)` — integer-overflow/cpp
+    case works). It does NOT fire end-to-end when taint must flow
+    through a constructed std::string object. The format-string,
+    stack-overflow, heap-overflow cpp variants need memory-region
+    taint to propagate through the wrapper.
+
+    SSO is orthogonal — Small String Optimization (MSVC: 15 chars
+    inline) doesn't matter for SSA-level taint; the issue is the
+    same regardless of storage.
+    """
+    if not name:
+        return None
+    # Itanium / GCC / Clang demangled forms
+    if "string::string" in name or "string<std::allocator" in name:
+        return [(1, 0)]
+    if "::basic_string" in name and ("basic_string<" in name or "::basic_string(" in name):
+        return [(1, 0)]
+    if ("std::vector" in name or "vector<" in name) and "::vector" in name:
+        return [(1, 0)]
+    return None
+
+
+def _augment_signals_for_sink(signals: list[str], *,
+                              sink_class: str, sink_name: str,
+                              function, call_addr: int,
+                              tainted_var, call_inst) -> list[str]:
+    """Per-class CFG-aware signal augmentation.
+
+    Returns a (possibly extended) signal list. Mutates nothing.
+
+    Per-class augmentations:
+
+    - `alloc_size` (integer-OF): add `missing_alloc_size_guard_dominator`
+      when no comparison on the tainted SSA size variable dominates the
+      alloc site. Per the daydream-surfaced lesson +
+      `ec_undefined_behavior_taxonomy`: GCC/Clang/MSVC can dead-code-
+      eliminate present-but-redundant guards under signed-OF UB, so the
+      load-bearing signal is the *absence* of a dominating comparison.
+
+    - `buffer_overflow` (stack-OF): add `stack_write_exceeds_compile_size`
+      when the destination resolves to a stack variable AND the sink is
+      an unbounded copy (strcpy/strcat/sprintf-family). Add
+      `leaf_redzone_use_with_tainted_offset` when the function is a
+      leaf using the SysV 128-byte red zone — invisible to detectors
+      keyed on `sub rsp, N` alone.
+    """
+    augmented = list(signals)
+
+    if sink_class == "alloc_size":
+        try:
+            has_guard = cfg.has_dominating_comparison_on(
+                function, call_addr, tainted_var,
+            )
+        except Exception:
+            has_guard = True              # fail-safe: don't false-flag on errors
+        if not has_guard:
+            augmented.append("missing_alloc_size_guard_dominator")
+
+    elif sink_class == "buffer_overflow":
+        # Inspect destination (params[0] for these sinks). Pass
+        # function context so the helper can chase SSA defs back to
+        # the stack-variable origin (call sites typically pass
+        # register-form SSA vars like `rcx#N`, not the stack var
+        # directly).
+        params = ilh.call_params(call_inst)
+        dst_is_stack = False
+        if params:
+            try:
+                dst_is_stack = ilh.resolves_to_stack_variable(
+                    params[0], function=function,
+                )
+            except Exception:
+                dst_is_stack = False
+        # Only fire SPECIFIC for unbounded copies — bounded ones
+        # (memcpy/strncpy/etc.) require additional len-arg analysis to
+        # cleanly establish overflow potential.
+        if dst_is_stack and sink_name in _UNBOUNDED_COPY_SINKS:
+            augmented.append("stack_write_exceeds_compile_size")
+        # Red-zone leaf — independent SPECIFIC.
+        try:
+            if dst_is_stack and ilh.function_uses_red_zone(function):
+                augmented.append("leaf_redzone_use_with_tainted_offset")
+        except Exception:
+            pass
+
+    return augmented
+
+
+def _dst_resolves_to_heap_alloc(call_inst, function) -> bool:
+    """True if the destination arg (params[0]) of a buffer_overflow
+    sink resolves to a heap allocation — i.e. the SSA-def chain of
+    the dst SSA var reaches a Call to malloc / calloc / realloc /
+    HeapAlloc / VirtualAlloc / operator new. Used to re-categorise
+    `stack_buffer_overflow` to `heap_buffer_overflow` when the
+    underlying buffer is heap-allocated.
+    """
+    if call_inst is None or function is None:
+        return False
+    bv = getattr(function, "view", None) or getattr(function, "_view", None)
+    if bv is None:
+        src = getattr(function, "source_function", None)
+        if src is not None:
+            bv = getattr(src, "view", None)
+    if bv is None:
+        return False
+    params = ilh.call_params(call_inst)
+    if not params:
+        return False
+    dst_var = ilh.expr_to_ssa_var(params[0])
+    if dst_var is None:
+        return False
+    # SSA-def chase up to 5 hops looking for an alloc-class call
+    seen: set = set()
+    cur = dst_var
+    alloc_names = {"malloc", "calloc", "realloc",
+                   "HeapAlloc", "VirtualAlloc", "_malloc_base",
+                   "operator new", "operator new[]",
+                   "ExAllocatePool", "ExAllocatePoolWithTag"}
+    for _ in range(6):
+        if cur is None:
+            return False
+        key = str(cur)
+        if key in seen:
+            return False
+        seen.add(key)
+        defn = ilh.ssa_def_of(function, cur)
+        if defn is None:
+            return False
+        # Is the def itself a Call to an alloc?
+        op_name = type(defn).__name__
+        if "Call" in op_name:
+            cval = getattr(getattr(defn, "dest", None), "constant", None)
+            if cval is not None:
+                sym = bv.get_symbol_at(int(cval))
+                if sym is not None:
+                    cname = (getattr(sym, "short_name", None) or sym.name or "")
+                    if cname in alloc_names:
+                        return True
+            return False
+        src_expr = getattr(defn, "src", None)
+        if src_expr is None:
+            return False
+        # Embedded Call?
+        if "Call" in type(src_expr).__name__:
+            cval = getattr(getattr(src_expr, "dest", None), "constant", None)
+            if cval is not None:
+                sym = bv.get_symbol_at(int(cval))
+                if sym is not None:
+                    cname = (getattr(sym, "short_name", None) or sym.name or "")
+                    if cname in alloc_names:
+                        return True
+        nested = ilh.expr_to_ssa_var(src_expr)
+        if nested is None:
+            return False
+        cur = nested
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -55,6 +278,22 @@ SINK_TABLE: dict[str, tuple[int, str]] = {
 # and propagation continues from the destination.
 #
 # Format: callee_name -> [(source_arg_idx, dest_arg_idx), ...]
+#
+# C++ stdlib propagators are NOT in this table — their demangled names
+# contain template parameters that vary per instantiation. They're
+# matched at lookup time by `_cpp_stdlib_propagator_for_name` below.
+# That helper handles std::basic_string ctor, std::vector ctor, the
+# `c_str()` / `data()` accessors (call-return transit; subsumed by
+# the generic mechanism), and equivalent MSVC-mangled forms.
+#
+# SSO note (per Run-19 daydream): MSVC's Small String Optimization
+# stores up to 15 characters inline in the std::string struct (no
+# heap pointer involved). Tainted const-char* into ctor + SSO path
+# means the tainted bytes live at a fixed struct offset — load-from-
+# struct-field propagation already covered by the existing E4 deref
+# detection (load-via-tainted-base). Explicit SSO modelling not
+# required for this propagator; the taint reaches the buffer either
+# way.
 PROPAGATORS: dict[str, list[tuple[int, int]]] = {
     # libc memory copies / printf-into-buffer
     "memcpy":     [(1, 0)],
@@ -296,7 +535,11 @@ class TaintAnalyzer:
     detector: str = "analysis.taint"
 
     findings: list[Finding] = field(default_factory=list)
-    visited: set = field(default_factory=set)
+    # Per-seed visited tracking: each top-level _propagate() call
+    # creates a fresh visited set internally. There's no instance-
+    # level visited state — that was the source of the Run-13
+    # nondeterminism (seed iteration order pre-empted later seeds
+    # at shared SSA vars).
     _emitted_deref_sigs: set = field(default_factory=set)
     # E5: addresses of in-binary functions identified as inlined-memcpy.
     # Populated by `_detect_inlined_memcpy_functions` at run() entry,
@@ -361,14 +604,32 @@ class TaintAnalyzer:
         if tainted_idx != arg_index:
             return None
 
-        # Get the function containing this call
+        # Get the function containing this call. `call_inst.function`
+        # returns the MLIL function — which doesn't have `.name`.
+        # Use `ilh.function_display_name` to traverse to the source
+        # function for display, while keeping the MLIL handle for
+        # SSA-form ops (it normalises through to SSA form internally).
         func = getattr(call_inst, "function", None)
-        func_name = getattr(func, "name", "") if func else ""
+        func_name = ilh.function_display_name(func)
         addr = int(getattr(call_inst, "address", 0))
 
-        return Finding(
+        # Re-categorise buffer_overflow → heap_buffer_overflow when
+        # the dst is heap-allocated (avoids dual-emit with heap.py).
+        # Also clears the stack-specific signals that wouldn't apply.
+        category_final = meta["category"]
+        signals_override = None
+        if sink_class == "buffer_overflow":
+            try:
+                if _dst_resolves_to_heap_alloc(call_inst, func):
+                    category_final = "heap_buffer_overflow"
+                    # heap-OF gets a different signal stack
+                    signals_override = ("tainted_pointer_write",
+                                         "alloc_then_write_no_full_init")
+            except Exception:
+                pass
+        finding = Finding(
             id="",
-            category=meta["category"],
+            category=category_final,
             severity=meta["severity"],
             address=addr,
             function=func_name,
@@ -399,12 +660,36 @@ class TaintAnalyzer:
                 "sink_class": sink_class,
             },
         )
+        # Fan-discount-aware confidence (Tier-2 foundation). Base
+        # signals come from `_SINK_CLASS_SIGNALS`; CFG-aware
+        # augmentations come from `_augment_signals_for_sink` (e.g.,
+        # the integer-OF missing-guard SPECIFIC). Sink classes not
+        # wired here get neutral 0.5.
+        # Heap-OF override: when re-categorised, use the heap-specific
+        # signal set instead of the stack-OF augmentation.
+        if signals_override is not None:
+            signals = list(signals_override)
+        else:
+            signals = list(_SINK_CLASS_SIGNALS.get(sink_class, ()))
+            signals = _augment_signals_for_sink(
+                signals,
+                sink_class=sink_class,
+                sink_name=sink_name,
+                function=func,
+                call_addr=addr,
+                tainted_var=tainted_var,
+                call_inst=call_inst,
+            )
+        if signals:
+            apply_signals_to_finding(finding, signals)
+        return finding
 
     # ── SSA propagation ──────────────────────────────────────────
 
     def _propagate(self, ssa_var, function, depth: int,
                    source_name: str, source_addr: int,
-                   via_load_count: int = 0) -> None:
+                   via_load_count: int = 0,
+                   visited: Optional[set] = None) -> None:
         """Recursive forward propagation through SSA def-use chains.
 
         `via_load_count` tracks how many memory loads the taint has
@@ -417,21 +702,39 @@ class TaintAnalyzer:
         a Finding when a tainted SSA var with `via_load_count >= 1`
         is dereffed, regardless of whether the deref then reaches a
         named sink.
+
+        `visited` is **per-seed**, not global. Each top-level seed
+        entry passes `None` and a fresh set is created here; recursive
+        calls within the seed thread the same set so cycles are
+        prevented within one exploration. Different seeds get
+        independent visited sets so they don't pre-empt each other —
+        that fixes the nondeterminism observed during Run 13 where
+        seed iteration order (driven by Python hash randomisation)
+        would cause findings to drop between runs. Cross-seed
+        deduplication of identical findings happens at the
+        `Finding.id` level (computed from category + binary +
+        address + detector + knowledge_refs).
         """
         if depth > self.max_depth:
             return
-        # Visited key intentionally excludes `via_load_count` — cycles
-        # in the SSA graph would otherwise re-explore the same node
-        # with monotonically incrementing counts and blow the stack.
-        # First visit's count is the natural one from the seed; later
-        # paths to the same node are subsumed.
-        key = (id(function), str(ssa_var))
-        if key in self.visited:
+        if visited is None:
+            visited = set()
+        # Visited key includes a boolean "has crossed any load"
+        # alongside (function, ssa_var). Without this bit, a node
+        # first visited with count=0 (no loads crossed) would block
+        # later visits with count>=1 (loads crossed) — losing the E4
+        # emission entirely on those paths. Encoding the boolean
+        # gives at most 2 states per node, bounded; cycles still
+        # resolve because monotonic count escalation past the
+        # threshold settles into the count>=1 state.
+        crossed_load = via_load_count >= 1
+        key = (id(function), str(ssa_var), crossed_load)
+        if key in visited:
             return
-        self.visited.add(key)
-        # Defensive cap — even with the visited set, an extremely
-        # nested load chain (`*****p`) shouldn't drive the count
-        # higher than the threshold below; we already emit on >=1.
+        visited.add(key)
+        # Defensive cap — once the count is high it doesn't matter
+        # how high; the E4 emission gate is at >= 1, and the visited
+        # key only differentiates 0 from >=1.
         if via_load_count > 5:
             via_load_count = 5
 
@@ -468,6 +771,7 @@ class TaintAnalyzer:
                 propagated = self._maybe_propagate_through_call(
                     use, ssa_var, function, depth,
                     source_name, source_addr,
+                    visited=visited,
                 )
                 if propagated:
                     continue
@@ -476,7 +780,8 @@ class TaintAnalyzer:
                 # propagate taint into the matching parameter.
                 if depth + 1 <= self.max_depth:
                     self._propagate_into_callee(use, ssa_var, depth + 1,
-                                                source_name, source_addr)
+                                                source_name, source_addr,
+                                                visited=visited)
 
                 # Generic call-return transit. A function that receives
                 # a tainted argument is conservatively treated as
@@ -490,7 +795,10 @@ class TaintAnalyzer:
                 # Skip when the call has a known propagator entry
                 # (already handled above) or when there's no caller-
                 # side output SSA var to taint.
-                if self._resolve_callee_name(use) in PROPAGATORS:
+                cur_callee_name = self._resolve_callee_name(use)
+                if (cur_callee_name in PROPAGATORS
+                        or (cur_callee_name is not None
+                            and _cpp_stdlib_propagator_for_name(cur_callee_name) is not None)):
                     continue
                 call_output = ilh.call_output_ssa(use)
                 if call_output is None:
@@ -508,7 +816,8 @@ class TaintAnalyzer:
                 if tainted_in_args:
                     self._propagate(call_output, function, depth,
                                     source_name, source_addr,
-                                    via_load_count=via_load_count)
+                                    via_load_count=via_load_count,
+                                    visited=visited)
                 continue
 
             # Otherwise propagate via the use's defined output(s).
@@ -532,7 +841,8 @@ class TaintAnalyzer:
             for new_var in outputs:
                 self._propagate(new_var, function, depth,
                                 source_name, source_addr,
-                                via_load_count=new_load_count)
+                                via_load_count=new_load_count,
+                                visited=visited)
 
     # ── E4 helpers — tainted-pointer-dereference detection ──────
 
@@ -706,15 +1016,27 @@ class TaintAnalyzer:
 
     def _maybe_propagate_through_call(self, call_inst, tainted_var,
                                       function, depth: int,
-                                      source_name: str, source_addr: int) -> bool:
+                                      source_name: str, source_addr: int,
+                                      visited: Optional[set] = None) -> bool:
         """If `call_inst` is a propagator with `tainted_var` at a
         source-arg slot, taint the destination-arg's SSA var and
         recurse. Returns True when the call was a propagator (the
-        caller should NOT also do an inter-proc hop)."""
+        caller should NOT also do an inter-proc hop).
+
+        `visited` is the per-seed visited set threaded from the
+        caller (`_propagate`); recursive _propagate calls share it
+        so cycles within the seed are caught.
+        """
         if depth > self.max_depth:
             return False
         callee_name = self._resolve_callee_name(call_inst)
-        if callee_name not in PROPAGATORS:
+        # Look up in the named PROPAGATORS table first; fall back to
+        # C++ stdlib pattern matching (handles per-instantiation
+        # template-parameter variation in mangled names).
+        propagator = PROPAGATORS.get(callee_name) if callee_name else None
+        if propagator is None and callee_name is not None:
+            propagator = _cpp_stdlib_propagator_for_name(callee_name)
+        if propagator is None:
             return False
         params = ilh.call_params(call_inst)
         if not params:
@@ -729,7 +1051,7 @@ class TaintAnalyzer:
         if tainted_idx is None:
             return False
         any_propagated = False
-        for (src_idx, dst_idx) in PROPAGATORS[callee_name]:
+        for (src_idx, dst_idx) in propagator:
             if src_idx != tainted_idx:
                 continue
             if dst_idx >= len(params):
@@ -738,14 +1060,18 @@ class TaintAnalyzer:
             if dst_ssa is None:
                 continue
             self._propagate(dst_ssa, function, depth,
-                            source_name, source_addr)
+                            source_name, source_addr,
+                            visited=visited)
             any_propagated = True
         return any_propagated
 
     def _propagate_into_callee(self, call_inst, tainted_var, depth: int,
-                               source_name: str, source_addr: int) -> None:
+                               source_name: str, source_addr: int,
+                               visited: Optional[set] = None) -> None:
         """When a tainted var is passed to an in-binary callee, follow
-        into the matching parameter's SSA chain."""
+        into the matching parameter's SSA chain. `visited` threaded
+        from the caller so cross-function steps remain part of the
+        same seed's exploration."""
         callee_addr = ilh.callee_address_of_call(call_inst)
         if callee_addr is None:
             return
@@ -793,7 +1119,8 @@ class TaintAnalyzer:
             return
 
         self._propagate(ssa_var, callee, depth,
-                        source_name, source_addr)
+                        source_name, source_addr,
+                        visited=visited)
 
     # ── Top-level run ────────────────────────────────────────────
 
@@ -1225,7 +1552,20 @@ class TaintAnalyzer:
                 continue
             self._propagate(output_var, func, depth=0,
                             source_name=source_name, source_addr=addr)
-        return self.findings
+
+        # Cross-seed deduplication. With per-seed visited tracking
+        # multiple seeds may reach the same sink and emit identical
+        # Findings. `Finding.compute_id()` hashes
+        # (category, binary, address, detector, knowledge_refs) — so
+        # duplicates from different seeds collide on id. Deduplicate
+        # by id, keeping first-arrived (its `source_name` is the one
+        # that wins in evidence; analytically equivalent to second-
+        # arrived since the bug shape and location are identical).
+        deduped: dict[str, Finding] = {}
+        for f in self.findings:
+            if f.id not in deduped:
+                deduped[f.id] = f
+        return list(deduped.values())
 
 
 # ─────────────────────────────────────────────────────────────────

@@ -106,6 +106,69 @@ CSPRNG_ABSENT_META = {
     ],
 }
 
+LOW_ENTROPY_SEED_META = {
+    "category": "low_entropy_prng_seed",
+    "severity": Severity.HIGH,
+    "cwe": ["CWE-338", "CWE-330", "CWE-336"],
+    "mitre_attack": ["T1600"],
+    "knowledge_refs": [
+        "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]",
+    ],
+}
+
+CSPRNG_LAUNDERED_TO_PRNG_META = {
+    "category": "csprng_laundered_to_weak_prng",
+    "severity": Severity.MEDIUM,
+    "cwe": ["CWE-330", "CWE-338"],
+    "mitre_attack": ["T1600"],
+    "knowledge_refs": [
+        "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]",
+    ],
+}
+
+
+# CSPRNG output sources — when one of these flows into srand/srandom
+# argument, the seed is high-entropy but the resulting PRNG is still
+# weak. The pattern is a code-review smell that suggests a developer
+# tried to "fix" weak randomness by using a CSPRNG seed. Output
+# of subsequent rand() calls is still predictable from a small
+# sequence of observations; CSPRNG seeding doesn't help.
+_CSPRNG_OUTPUT_FUNCTIONS: frozenset[str] = frozenset({
+    "BCryptGenRandom", "CryptGenRandom",
+    "RtlGenRandom", "SystemFunction036",
+    "RAND_bytes", "RAND_priv_bytes",
+    "getrandom", "arc4random", "arc4random_buf",
+    "/dev/urandom",        # synthetic if literal-string match
+})
+
+
+# Low-entropy time-source imports — when these flow into srand/srandom
+# (or the engine equivalents), the resulting PRNG state is recoverable
+# given approximate boot/connect time. The canonical exploitation
+# vector behind UE5 HandshakeSecret recovery.
+_LOW_ENTROPY_TIME_SOURCES: frozenset[str] = frozenset({
+    # POSIX
+    "time", "gettimeofday", "clock", "clock_gettime", "times",
+    # Win32
+    "GetTickCount", "GetTickCount64",
+    "QueryPerformanceCounter", "QueryUnbiasedInterruptTime",
+    "GetSystemTimeAsFileTime", "GetSystemTime",
+    "GetSystemTimePreciseAsFileTime",
+    "RtlQueryPerformanceCounter",
+    # CPU intrinsics — shipped as compiler-provided functions in
+    # some toolchains (when imported by name)
+    "__rdtsc", "_rdtsc",
+})
+
+
+# Seed-class imports — seeding APIs whose argument is the seed value
+# we want to trace.
+_PRNG_SEED_FUNCTIONS: frozenset[str] = frozenset({
+    "srand", "srandom", "seed48", "lcong48", "srand48",
+    # Engine-specific (when imported by name)
+    "srand_r",
+})
+
 
 # ─────────────────────────────────────────────────────────────────
 # Structural detector: PRNG output → crypto-sink flow
@@ -114,7 +177,16 @@ CSPRNG_ABSENT_META = {
 
 def _enumerate_prng_calls(bv) -> list[tuple[str, int, object]]:
     """Return [(prng_name, call_addr, mlil_inst), ...] for each call to
-    a non-CSPRNG function present in the binary."""
+    a non-CSPRNG function present in the binary, INCLUDING synthetic
+    PRNG sources discovered via LCG-constant pattern hits.
+
+    Synthetic-source hookup (Plan C v2): functions that contain glibc
+    rand-LCG / MSVC rand-LCG / Mersenne-Twister constants are
+    inlined-PRNG implementations even when the binary doesn't import
+    `rand()` directly. UE5's `FMath::Rand` wraps `rand()` inline; the
+    LCG constants live in `.rdata`. Enumerating calls to those
+    functions gives us PRNG sources without name resolution.
+    """
     out: list[tuple[str, int, object]] = []
     imports = imports_in(bv)
     for prng_name in PRNG_FUNCTIONS:
@@ -124,6 +196,81 @@ def _enumerate_prng_calls(bv) -> list[tuple[str, int, object]]:
             if mlil is None:
                 continue
             out.append((prng_name, addr, mlil))
+
+    # Synthetic PRNG sources from LCG-constant pattern hits
+    synthetic = _enumerate_synthetic_prng_call_sites(bv)
+    out.extend(synthetic)
+    return out
+
+
+def _functions_containing_lcg_constants(bv) -> set[int]:
+    """Run the LCG-constant heuristics and return the set of function
+    start addresses that contain them.
+
+    Re-runs the constant-pattern scan rather than caching to keep the
+    analyzer stateless — the cost is bounded (constant-pattern scans
+    are sub-second on typical binaries).
+    """
+    if bv is None:
+        return set()
+    function_addrs: set[int] = set()
+    # Use the heuristics to find LCG / MT constants — the same machinery
+    # that produces `lcg_constants` findings.
+    findings = heur_crypto.match(bv, binary="", arch="", platform="",
+                                 detector="analysis.crypto.synthetic")
+    for f in findings:
+        cat = getattr(f, "category", "")
+        if cat in ("lcg_constants", "mt19937_use", "lcg_xor_cipher"):
+            # Find the function containing this finding's address
+            try:
+                for func in bv.get_functions_containing(int(f.address)):
+                    function_addrs.add(int(func.start))
+            except Exception:
+                continue
+    return function_addrs
+
+
+def _enumerate_synthetic_prng_call_sites(bv) -> list[tuple[str, int, object]]:
+    """For each function identified as containing LCG / MT constants,
+    enumerate its caller-side call sites. Each caller's call to the
+    LCG-containing function becomes a synthetic PRNG source — the
+    output SSA var is tainted as PRNG-derived, just like `rand()`.
+
+    Returns [(synthetic_name, call_addr, mlil_inst), ...].
+    """
+    if bv is None:
+        return []
+    lcg_funcs = _functions_containing_lcg_constants(bv)
+    if not lcg_funcs:
+        return []
+    out: list[tuple[str, int, object]] = []
+    for func_addr in lcg_funcs:
+        target_func = bv.get_function_at(func_addr)
+        if target_func is None:
+            continue
+        target_name = ilh.function_display_name(target_func) or f"sub_{func_addr:x}"
+        # Find callers of this function
+        try:
+            callers = list(target_func.callers)
+        except Exception:
+            callers = []
+        for caller in callers:
+            mlil = getattr(caller, "mlil", None)
+            if mlil is None:
+                continue
+            ssa = getattr(mlil, "ssa_form", None) or mlil
+            try:
+                for inst in ssa.instructions:
+                    op_name = type(inst).__name__
+                    if "Call" not in op_name:
+                        continue
+                    cval = getattr(getattr(inst, "dest", None), "constant", None)
+                    if cval is None or int(cval) != func_addr:
+                        continue
+                    out.append((f"synthetic_lcg:{target_name}",
+                                int(getattr(inst, "address", 0)), inst))
+            except Exception:
+                continue
     return out
 
 
@@ -262,6 +409,286 @@ def find_csprng_absence(bv, *, binary: str, arch: str, platform: str,
 
 
 # ─────────────────────────────────────────────────────────────────
+# Low-entropy PRNG seed detection (Plan C — Run 16)
+# ─────────────────────────────────────────────────────────────────
+
+
+def _ssa_def_traces_to_time_source(bv, function, ssa_var,
+                                   *, max_hops: int = 5) -> Optional[str]:
+    """Walk SSA defs from `ssa_var` looking for a Call whose target
+    is in `_LOW_ENTROPY_TIME_SOURCES`. Returns the time-source name
+    if found, else None.
+
+    The chase passes through SetVar (alias copies), CastInt (the
+    `(unsigned)time(NULL)` shape), and Call-output unwrap.
+    """
+    if function is None or ssa_var is None:
+        return None
+    seen: set = set()
+    cur = ssa_var
+    for _ in range(max_hops):
+        key = str(cur)
+        if key in seen:
+            return None
+        seen.add(key)
+        defn = ilh.ssa_def_of(function, cur)
+        if defn is None:
+            return None
+        # Is the def site itself a Call to a time source?
+        op_name = type(defn).__name__
+        if "Call" in op_name:
+            cval = getattr(getattr(defn, "dest", None), "constant", None)
+            if cval is not None and bv is not None:
+                sym = bv.get_symbol_at(int(cval))
+                if sym is not None:
+                    name = (getattr(sym, "short_name", None)
+                            or getattr(sym, "name", ""))
+                    if name in _LOW_ENTROPY_TIME_SOURCES:
+                        return name
+            return None
+        src_expr = getattr(defn, "src", None)
+        if src_expr is None:
+            return None
+        # Check if src expression IS a Call (some MLIL forms wrap calls
+        # inside SetVarSsa.src)
+        src_op = type(src_expr).__name__
+        if "Call" in src_op:
+            cval = getattr(getattr(src_expr, "dest", None), "constant", None)
+            if cval is not None and bv is not None:
+                sym = bv.get_symbol_at(int(cval))
+                if sym is not None:
+                    name = (getattr(sym, "short_name", None)
+                            or getattr(sym, "name", ""))
+                    if name in _LOW_ENTROPY_TIME_SOURCES:
+                        return name
+            return None
+        # Chase through SetVar / cast / arithmetic
+        nested = ilh.expr_to_ssa_var(src_expr)
+        if nested is None:
+            # Recurse into operands once for cast / arithmetic
+            for op in getattr(src_expr, "operands", []) or []:
+                if hasattr(op, "var") and hasattr(op, "version"):
+                    cur = op
+                    nested = op
+                    break
+                nested_inner = ilh.expr_to_ssa_var(op)
+                if nested_inner is not None:
+                    cur = nested_inner
+                    nested = nested_inner
+                    break
+            if nested is None:
+                return None
+            continue
+        cur = nested
+    return None
+
+
+def _ssa_def_traces_to_csprng_source(bv, function, ssa_var,
+                                     *, max_hops: int = 5) -> Optional[str]:
+    """Walk SSA defs from `ssa_var` looking for a Call whose target
+    is in `_CSPRNG_OUTPUT_FUNCTIONS`. Returns the source name if
+    found, else None.
+
+    Same shape as `_ssa_def_traces_to_time_source` but for the
+    CSPRNG side — used to detect the daydream-flagged
+    "BCryptGenRandom → srand → rand → key" laundering pattern.
+    """
+    if function is None or ssa_var is None:
+        return None
+    seen: set = set()
+    cur = ssa_var
+    for _ in range(max_hops):
+        key = str(cur)
+        if key in seen:
+            return None
+        seen.add(key)
+        defn = ilh.ssa_def_of(function, cur)
+        if defn is None:
+            return None
+        op_name = type(defn).__name__
+        if "Call" in op_name:
+            cval = getattr(getattr(defn, "dest", None), "constant", None)
+            if cval is not None and bv is not None:
+                sym = bv.get_symbol_at(int(cval))
+                if sym is not None:
+                    name = (getattr(sym, "short_name", None)
+                            or getattr(sym, "name", ""))
+                    if name in _CSPRNG_OUTPUT_FUNCTIONS:
+                        return name
+            return None
+        src_expr = getattr(defn, "src", None)
+        if src_expr is None:
+            return None
+        # Embedded Call?
+        if "Call" in type(src_expr).__name__:
+            cval = getattr(getattr(src_expr, "dest", None), "constant", None)
+            if cval is not None and bv is not None:
+                sym = bv.get_symbol_at(int(cval))
+                if sym is not None:
+                    name = (getattr(sym, "short_name", None)
+                            or getattr(sym, "name", ""))
+                    if name in _CSPRNG_OUTPUT_FUNCTIONS:
+                        return name
+            return None
+        nested = ilh.expr_to_ssa_var(src_expr)
+        if nested is None:
+            for op in getattr(src_expr, "operands", []) or []:
+                nested_inner = ilh.expr_to_ssa_var(op)
+                if nested_inner is not None:
+                    nested = nested_inner
+                    break
+            if nested is None:
+                return None
+        cur = nested
+    return None
+
+
+def find_csprng_laundered_to_prng(bv, *, binary: str, arch: str, platform: str,
+                                  detector: str) -> list[Finding]:
+    """Detect `BCryptGenRandom(...) → srand(that) → rand() → key`-class
+    laundering: a CSPRNG output is used to seed a weak PRNG. The
+    seed is high-entropy but the resulting PRNG output is still
+    predictable from a few observations.
+
+    Daydream-flagged pattern — without explicit detection a tag-based
+    entropy classifier would clear the chain because the seed came
+    from a CSPRNG.
+    """
+    findings: list[Finding] = []
+    if bv is None:
+        return findings
+    imports = imports_in(bv)
+    seed_present = imports & _PRNG_SEED_FUNCTIONS
+    if not seed_present:
+        return findings
+
+    for seed_name in seed_present:
+        for addr, mlil in ilh.call_sites_of_import(bv, seed_name):
+            if mlil is None:
+                continue
+            params = ilh.call_params(mlil)
+            if not params:
+                continue
+            seed_arg = ilh.expr_to_ssa_var(params[0])
+            if seed_arg is None:
+                continue
+            function = getattr(mlil, "function", None)
+            csprng_src = _ssa_def_traces_to_csprng_source(bv, function, seed_arg)
+            if csprng_src is None:
+                continue
+            func_name = ilh.function_display_name(function)
+            meta = CSPRNG_LAUNDERED_TO_PRNG_META
+            finding = Finding(
+                id="",
+                category=meta["category"],
+                severity=meta["severity"],
+                address=addr,
+                function=func_name,
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                knowledge_refs=list(meta["knowledge_refs"]),
+                cwe=list(meta["cwe"]),
+                mitre_attack=list(meta["mitre_attack"]),
+                description=(
+                    f"{seed_name}@0x{addr:x} seeded from {csprng_src}() — "
+                    f"the seed is high-entropy but the resulting weak-PRNG "
+                    f"output is still predictable from a few observations. "
+                    f"Use the CSPRNG output directly as keying material; "
+                    f"do not pass it through {seed_name.replace('s','')}-family."
+                ),
+                evidence=[Evidence(
+                    kind="csprng_to_weak_prng_seed",
+                    source=detector,
+                    payload=f"{seed_name}@0x{addr:x} <- {csprng_src}",
+                    address=addr,
+                    function=func_name,
+                )],
+                details={
+                    "seed_name": seed_name,
+                    "csprng_source": csprng_src,
+                },
+            )
+            from ..lib.scoring import apply_signals_to_finding
+            apply_signals_to_finding(finding, [
+                "csprng_laundered_through_weak_prng",   # SPECIFIC
+            ])
+            findings.append(finding)
+    return findings
+
+
+def find_low_entropy_seeds(bv, *, binary: str, arch: str, platform: str,
+                           detector: str) -> list[Finding]:
+    """Detect `srand(time(NULL))`-class low-entropy seed patterns.
+
+    Walks call sites of seed-class imports (`srand`, `srandom`, etc.).
+    For each, traces the seed argument's SSA-def chain backwards
+    looking for a call to a low-entropy time source. Emit a Finding
+    when the chain matches.
+    """
+    findings: list[Finding] = []
+    if bv is None:
+        return findings
+    imports = imports_in(bv)
+    seed_present = imports & _PRNG_SEED_FUNCTIONS
+    if not seed_present:
+        return findings
+
+    for seed_name in seed_present:
+        for addr, mlil in ilh.call_sites_of_import(bv, seed_name):
+            if mlil is None:
+                continue
+            params = ilh.call_params(mlil)
+            if not params:
+                continue
+            seed_arg = ilh.expr_to_ssa_var(params[0])
+            if seed_arg is None:
+                continue
+            function = getattr(mlil, "function", None)
+            time_src = _ssa_def_traces_to_time_source(bv, function, seed_arg)
+            if time_src is None:
+                continue
+            func_name = ilh.function_display_name(function)
+            meta = LOW_ENTROPY_SEED_META
+            finding = Finding(
+                id="",
+                category=meta["category"],
+                severity=meta["severity"],
+                address=addr,
+                function=func_name,
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                knowledge_refs=list(meta["knowledge_refs"]),
+                cwe=list(meta["cwe"]),
+                mitre_attack=list(meta["mitre_attack"]),
+                description=(
+                    f"{seed_name}@0x{addr:x} seeded from {time_src}() output — "
+                    f"the resulting PRNG state is recoverable given approximate "
+                    f"boot or connect time. Any security-relevant output "
+                    f"derived from subsequent {seed_name.replace('s','')}-family "
+                    f"calls is predictable."
+                ),
+                evidence=[Evidence(
+                    kind="low_entropy_seed",
+                    source=detector,
+                    payload=f"{seed_name}@0x{addr:x} <- {time_src}",
+                    address=addr,
+                    function=func_name,
+                )],
+                details={
+                    "seed_name": seed_name,
+                    "time_source": time_src,
+                },
+            )
+            from ..lib.scoring import apply_signals_to_finding
+            apply_signals_to_finding(finding, [
+                "low_entropy_seed_to_prng",       # SPECIFIC
+            ])
+            findings.append(finding)
+
+    return findings
+
+
+# ─────────────────────────────────────────────────────────────────
 # Public entry
 # ─────────────────────────────────────────────────────────────────
 
@@ -290,6 +717,14 @@ def analyze(session, *, binary: Optional[str] = None,
     ))
     # 3. CSPRNG-absent advisory.
     findings.extend(find_csprng_absence(
+        bv, binary=binary, arch=arch, platform=platform, detector=detector,
+    ))
+    # 4. Low-entropy seed (Plan C / Run 17).
+    findings.extend(find_low_entropy_seeds(
+        bv, binary=binary, arch=arch, platform=platform, detector=detector,
+    ))
+    # 5. CSPRNG-to-weak-PRNG laundering (Plan C v2 / Run 19).
+    findings.extend(find_csprng_laundered_to_prng(
         bv, binary=binary, arch=arch, platform=platform, detector=detector,
     ))
 

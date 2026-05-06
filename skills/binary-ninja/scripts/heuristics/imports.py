@@ -25,11 +25,22 @@ from ..output.finding import Severity
 
 SOURCES_LIBC: set[str] = {
     "argv",                      # synthetic — main's argv parameter
-    "getenv", "secure_getenv",
+    "getenv", "getenv_s", "secure_getenv",
     "fgets", "gets", "gets_s",
     "fread", "read", "recv", "recvfrom", "recvmsg",
     "scanf", "fscanf", "sscanf", "vscanf", "vfscanf", "vsscanf",
     "stdin",
+    # Single-character / byte input — return value carries the
+    # attacker-controlled byte (legacy `deep_analysis.py:TAINT_SOURCES`).
+    "getchar", "getc", "fgetc", "getchar_unlocked",
+    # Network connection accept — caller assumes the returned socket
+    # is attacker-influenced (legacy `attack_surface.py:ENTRY_SOURCES`).
+    "accept", "accept4",
+    # IPC message receive — message body is attacker-controlled.
+    "msgrcv", "mq_receive", "mq_timedreceive",
+    # Shared-memory attach — region contents are attacker-controlled
+    # when a hostile process has write access.
+    "shmat",
 }
 
 SOURCES_WIN32: set[str] = {
@@ -72,6 +83,42 @@ SINKS: list[tuple[str, int, str]] = [
     # ── Memory copy — bounded but error-prone ───────────────────
     ("strncpy",     2, "buffer_overflow"),       # NUL-termination footgun
     ("strncat",     2, "buffer_overflow"),
+
+    # ── Unbounded read — no length argument; the destination buffer
+    # is filled until newline / NUL. Direct attacker-controlled write.
+    ("gets",        0, "buffer_overflow"),
+
+    # ── Stack allocation — tainted size flows to alloca. The return
+    # is a stack pointer; large sizes blow the stack. Same `alloc_size`
+    # class as malloc/calloc/realloc — consumers want the integer-OF
+    # → undersized-alloc finding.
+    ("alloca",      0, "alloc_size"),
+    ("_alloca",     0, "alloc_size"),
+    ("__builtin_alloca", 0, "alloc_size"),
+
+    # ── FORTIFY_SOURCE checked variants — same vulnerability class
+    # as the unchecked baseline. Compiler-generated runtime bound
+    # checks cover the common case but NOT all overflow scenarios
+    # (dynamic destination size, format-string sites, etc.).
+    # Argument indices match the underlying API (legacy
+    # `deep_analysis.py:TAINT_SINKS`).
+    ("__strcpy_chk",   1, "buffer_overflow"),
+    ("__strcat_chk",   1, "buffer_overflow"),
+    ("__memcpy_chk",   2, "buffer_overflow"),
+    ("__memmove_chk",  2, "buffer_overflow"),
+    # `__sprintf_chk(str, flag, len, fmt, ...)` — fmt is at arg 3
+    ("__sprintf_chk",  3, "format_string"),
+    ("__vsprintf_chk", 3, "format_string"),
+    # `__printf_chk(flag, fmt, ...)` — fmt at arg 1
+    ("__printf_chk",   1, "format_string"),
+    ("__vprintf_chk",  1, "format_string"),
+    # `__fprintf_chk(stream, flag, fmt, ...)` — fmt at arg 2
+    ("__fprintf_chk",  2, "format_string"),
+    ("__vfprintf_chk", 2, "format_string"),
+    # `__snprintf_chk(str, maxlen, flag, len, fmt, ...)` — fmt at arg 4
+    ("__snprintf_chk", 4, "format_string"),
+    ("__vsnprintf_chk", 4, "format_string"),
+    ("__syslog_chk",   2, "format_string"),
 
     # ── Format string ────────────────────────────────────────────
     ("printf",      0, "format_string"),

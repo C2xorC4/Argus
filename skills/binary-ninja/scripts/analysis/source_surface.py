@@ -203,6 +203,100 @@ def _scan_callees(func: SourceFunction) -> None:
     func.callees = callees
 
 
+# ─────────────────────────────────────────────────────────────────
+# UE5-aware source patterns (Plan D — Run 19)
+# ─────────────────────────────────────────────────────────────────
+
+
+# `>` cap check that should be `>=` — the canonical FString
+# off-by-one. Heuristic: `SaveNum > MaxSerializeSize` (or any
+# `<numericName> > <CapitalSerializeName>`) is suspicious.
+_UE5_OFFBYONE_CAP_RE = re.compile(
+    r"\bif\s*\(\s*([A-Z]\w*)\s*>\s*([A-Z]\w*(?:Size|Length|Limit|Cap|Max\w*))\s*\)"
+)
+
+# `Empty(N); ... AddUninitialized(N); ... <Read|Serialize|FromBytes>(...)` —
+# allocate-before-read CFG shape at source level. The reads happen
+# before the buffer's contents are validated.
+_UE5_ALLOC_BEFORE_READ_RE = re.compile(
+    r"\.Empty\s*\(\s*([^)]{1,80}?)\s*\)\s*;\s*"
+    r"[^;]*?\.AddUninitialized\s*\(\s*\1\s*\)\s*;",
+    re.DOTALL,
+)
+
+# `FMath::Rand() % N` — UE5 PRNG-mod-N. When N appears in a security
+# context (handshake, secret, cookie, key, token), the entropy is
+# limited to `log2(N)` bits.
+_UE5_RAND_MOD_RE = re.compile(
+    r"\bFMath::Rand\s*\(\s*\)\s*%\s*(\d+|\w+)"
+)
+
+
+# UE5 source pattern findings — info-grade by default; operators
+# pair with binary-side detection for high-confidence verdicts.
+UE5_SOURCE_FINDING_META = {
+    "ue5_offbyone_cap_check": {
+        "severity": Severity.MEDIUM,
+        "category": "ue5_offbyone_cap_check",
+        "cwe": ["CWE-193", "CWE-787"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/ue5_fstring_allocation_amplification]]",
+        ],
+    },
+    "ue5_allocate_before_read": {
+        "severity": Severity.HIGH,
+        "category": "ue5_allocate_before_read",
+        "cwe": ["CWE-457", "CWE-908"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/ue5_fstring_allocation_amplification]]",
+            "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]",
+        ],
+    },
+    "ue5_rand_mod_in_security_path": {
+        "severity": Severity.HIGH,
+        "category": "ue5_rand_mod_in_security_path",
+        "cwe": ["CWE-338", "CWE-330"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]",
+        ],
+    },
+}
+
+
+def _scan_ue5_source_patterns(text: str, file_path: str
+                              ) -> list[tuple[str, int, str]]:
+    """Return [(category, line_number, snippet), ...] for UE5 patterns
+    matched in `text`.
+
+    Categories: `ue5_offbyone_cap_check`, `ue5_allocate_before_read`,
+    `ue5_rand_mod_in_security_path`.
+    """
+    out: list[tuple[str, int, str]] = []
+    for m in _UE5_OFFBYONE_CAP_RE.finditer(text):
+        line = text[:m.start()].count("\n") + 1
+        snippet = text[max(0, m.start() - 20):m.end() + 30].strip()
+        out.append(("ue5_offbyone_cap_check", line, snippet))
+    for m in _UE5_ALLOC_BEFORE_READ_RE.finditer(text):
+        line = text[:m.start()].count("\n") + 1
+        snippet = text[max(0, m.start() - 20):m.end() + 30].strip()
+        out.append(("ue5_allocate_before_read", line, snippet))
+    # Rand-mod-N: only flag when N appears near a security keyword
+    # in the surrounding 200 chars.
+    security_keywords = ("Handshake", "Secret", "Cookie", "Token",
+                         "Key", "Nonce", "AuthCode", "ChallengeBytes",
+                         "Cipher", "Crypto", "HMAC")
+    for m in _UE5_RAND_MOD_RE.finditer(text):
+        ctx_start = max(0, m.start() - 200)
+        ctx_end = min(len(text), m.end() + 100)
+        context = text[ctx_start:ctx_end]
+        if not any(kw in context for kw in security_keywords):
+            continue
+        line = text[:m.start()].count("\n") + 1
+        snippet = text[max(0, m.start() - 30):m.end() + 30].strip()
+        out.append(("ue5_rand_mod_in_security_path", line, snippet))
+    return out
+
+
 def _scan_ioctl_bindings(text: str, file_path: str) -> list[IoctlBinding]:
     out: list[IoctlBinding] = []
     for m in _IOCTL_CMP_RE.finditer(text):
@@ -250,6 +344,32 @@ def parse_source_dir(source_dir: Path) -> tuple[list[SourceFunction],
             funcs.append(f)
         ioctls.extend(_scan_ioctl_bindings(text, rel))
     return funcs, ioctls
+
+
+def parse_ue5_patterns(source_dir: Path) -> list[tuple[str, str, int, str]]:
+    """Scan for UE5-specific source patterns (Plan D — Run 19).
+
+    Returns [(category, file_rel_path, line_number, snippet), ...]
+    for matches of: `ue5_offbyone_cap_check`, `ue5_allocate_before_read`,
+    `ue5_rand_mod_in_security_path`.
+    """
+    out: list[tuple[str, str, int, str]] = []
+    if not source_dir.exists() or not source_dir.is_dir():
+        return out
+    for path in source_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in (".c", ".cpp", ".cc", ".cxx",
+                                        ".h", ".hpp", ".inl"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        rel = str(path.relative_to(source_dir)) if source_dir in path.parents else str(path)
+        for cat, line, snippet in _scan_ue5_source_patterns(text, rel):
+            out.append((cat, rel, line, snippet))
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -486,7 +606,8 @@ def analyze(session, *, binary: Optional[str] = None,
 
     source_dir = Path(source_dir)
     src_funcs, ioctls = parse_source_dir(source_dir)
-    if not src_funcs and not ioctls:
+    ue5_matches = parse_ue5_patterns(source_dir)
+    if not src_funcs and not ioctls and not ue5_matches:
         return []
 
     # Don't clobber names Binja's platform module already set (e.g.,
@@ -622,5 +743,34 @@ def analyze(session, *, binary: Optional[str] = None,
             "ioctl_codes": [hex(c) for c in sorted(seen_codes)],
         },
     ))
+
+    # 4. UE5 source-pattern findings (Plan D — Run 19).
+    for cat, file_rel, line, snippet in ue5_matches:
+        meta = UE5_SOURCE_FINDING_META.get(cat)
+        if meta is None:
+            continue
+        findings.append(Finding(
+            id="",
+            category=meta["category"],
+            severity=meta["severity"],
+            address=0,
+            function=f"{file_rel}:{line}",
+            binary=binary,
+            arch=arch,
+            platform=platform,
+            detector="analysis.source_surface.ue5",
+            knowledge_refs=list(meta["knowledge_refs"]),
+            cwe=list(meta["cwe"]),
+            description=(
+                f"UE5 source pattern `{cat}` matched at "
+                f"{file_rel}:{line}: {snippet[:100]}"
+            ),
+            details={
+                "ue5_pattern": cat,
+                "source_file": file_rel,
+                "source_line": line,
+                "snippet": snippet,
+            },
+        ))
 
     return findings
