@@ -61,6 +61,7 @@ from . import (
     hooking,
     imports,
     injection,
+    known_vulnerable_patterns,
     mitigations,
     obfuscation,
     rootkit,
@@ -97,6 +98,7 @@ ALL_MODULES = (
     obfuscation,
     arch,
     hooking,
+    known_vulnerable_patterns,
 )
 
 
@@ -126,6 +128,6 @@ __all__ = [
     # Modules
     "imports", "syscalls", "injection", "evasion",
     "rootkit", "crypto", "mitigations", "obfuscation",
-    "arch", "hooking", "chains",
+    "arch", "hooking", "chains", "known_vulnerable_patterns",
     "ALL_MODULES", "match_all",
 ]
