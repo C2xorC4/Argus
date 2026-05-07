@@ -260,42 +260,45 @@ def _function_has_conditional(func) -> bool:
     return False
 
 
-def _verify_call_dominates_commit(bv, func, commit_addr: int) -> bool:
-    """v3 order check — a verify-flavoured call dominates the commit.
+def _scan_verify_calls(bv, func, commit_addr: int) -> tuple[bool, bool]:
+    """Scan `func` for verify-flavoured calls and report two facts:
 
-    The canonical commit-before-verify vulnerability has any verify
-    call AFTER the commit (or no verify at all). The verify-then-
-    write safe pattern has at least one verify-flavoured call whose
-    basic block dominates the commit's basic block.
+    - `any_present` — does *any* verify-flavoured call exist anywhere
+       in the function? Used by v4 to distinguish commit-before-verify
+       (the EAC bug class) from commit-without-cleanup (cleanup_dominance's
+       territory). When no verify call exists at all, this detector
+       should not fire — there is no "wrong order" to report.
+    - `dominates_commit` — does some verify-flavoured call dominate the
+       commit (verify-then-write safe pattern)? When True, the commit
+       is guarded.
 
     "Verify-flavoured" = (a) a call to anything in `_VERIFY_IMPORTS`,
     or (b) a call whose callee name contains a `_VERIFY_NAME_TOKENS`
     substring (case-insensitive). The latter handles user-defined
-    verify wrappers (e.g. `verify_bytes`, `validate_payload`) that
-    aren't imports.
+    verify wrappers (e.g. `verify_bytes`, `validate_payload`).
 
-    Uses Function-level basic blocks (not MLIL blocks) for the
-    dominance query — Function blocks are address-indexed and avoid
-    the MLIL-instruction-range lookup ambiguity that surfaced when
-    MLIL reorders instructions across basic blocks.
-
-    Returns True when a verify call dominates the commit and the
-    detector should suppress this site.
+    Uses Function-level basic blocks (not MLIL blocks) for dominance —
+    Function blocks are address-indexed and avoid the MLIL
+    instruction-range lookup ambiguity.
     """
     if bv is None:
-        return False
+        return (False, False)
     source_func = getattr(func, "source_function", None) or func
     if not hasattr(source_func, "get_basic_block_at"):
-        return False
+        return (False, False)
     commit_bbs = source_func.get_basic_block_at(commit_addr)
     commit_block = commit_bbs[0] if isinstance(commit_bbs, list) and commit_bbs else commit_bbs
     if not commit_block:
-        return False
+        return (False, False)
 
     ssa = _to_ssa(func)
     if ssa is None:
-        return False
+        return (False, False)
+
     verify_imports_lc = {n.lower() for n in _VERIFY_IMPORTS}
+    any_present = False
+    dominates_commit = False
+
     try:
         for inst in ssa.instructions:
             op_name = type(inst).__name__
@@ -323,32 +326,32 @@ def _verify_call_dominates_commit(bv, func, commit_addr: int) -> bool:
             if not is_verify:
                 continue
 
+            any_present = True
+
             call_bbs = source_func.get_basic_block_at(call_addr)
             call_block = call_bbs[0] if isinstance(call_bbs, list) and call_bbs else call_bbs
             if not call_block:
                 continue
 
-            dominates = False
             cb_start = getattr(call_block, "start", None)
             xb_start = getattr(commit_block, "start", None)
             if (cb_start is not None and xb_start is not None
                     and cb_start == xb_start):
-                # Same logical block — `get_basic_block_at` returns
-                # fresh wrappers per call so identity (`is`) is unreliable.
-                dominates = call_addr < commit_addr
+                if call_addr < commit_addr:
+                    dominates_commit = True
+                    return (any_present, dominates_commit)
             else:
                 doms = getattr(commit_block, "dominators", None)
                 if doms is not None:
                     try:
-                        dominates = call_block in doms
+                        if call_block in doms:
+                            dominates_commit = True
+                            return (any_present, dominates_commit)
                     except Exception:
-                        dominates = False
-
-            if dominates:
-                return True
+                        pass
     except Exception:
-        return False
-    return False
+        return (any_present, dominates_commit)
+    return (any_present, dominates_commit)
 
 
 def _rollback_dominates_all_exits_after_commit(func, commit_addr: int,
@@ -454,13 +457,23 @@ def find_pre_verification_writes(bv, *, binary: str, arch: str, platform: str,
                 continue
             seen_function_keys.add(fkey)
 
-            # v3 order check first: if a verify-flavoured call dominates
-            # the commit, the commit is in a verify-then-write pattern
-            # (safe), not the EAC commit-then-verify vulnerability.
-            # Catches user-defined verify wrappers (verify_bytes,
-            # validate_payload) that aren't imports — the v1/v2 logic
-            # missed these and fired on remediation cells.
-            if _verify_call_dominates_commit(bv, func, addr):
+            # v3 + v4 verify-call gates:
+            # v3 — if a verify-flavoured call dominates the commit, the
+            #      commit is verify-then-write (safe), not the EAC
+            #      commit-then-verify vulnerability.
+            # v4 — if no verify-flavoured call exists in the function
+            #      AT ALL, this detector has no "wrong order" to report.
+            #      The structural concern is "commit without cleanup" —
+            #      cleanup_dominance owns that signal. Surface here as
+            #      pre_verification_write would FP on routine commit
+            #      patterns (reg.exe / sc.exe / cmd.exe per the
+            #      2026-05-07 clean-corpus sweep).
+            verify_present, verify_dominates = _scan_verify_calls(
+                bv, func, addr,
+            )
+            if verify_dominates:
+                continue
+            if not verify_present:
                 continue
 
             call_set = _function_call_set(bv, func)
