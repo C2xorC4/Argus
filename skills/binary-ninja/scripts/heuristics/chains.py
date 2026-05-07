@@ -46,21 +46,18 @@ EAC_PERMISSIVE_PREWRITE_CACHE = ChainPattern(
     primitives=[
         "permissive_sddl",
         "pre_verification_write",
-        # `missing_cleanup_on_failure` is currently subsumed by the
-        # v3 pre_verification_write detector (the rollback-dominance
-        # check is part of pre_verify_write's emission gate). Listed
-        # here for documentation; not separately emitted today.
+        # Now-implemented v1 detectors (2026-05-07):
+        #  - `missing_cleanup_on_failure`: analysis/cleanup_dominance.py
+        #    (coarse — fires on commit-without-rollback-import).
+        #  - `trusted_path_cache_load`: analysis/trusted_path.py
+        #    (binary-scope — attacker-writable path string + load API).
+        # Both are minimal-v1 forms; tightening from coarse-recall to
+        # precision-aware versions is future work.
         "missing_cleanup_on_failure",
-        # `trusted_path_cache_load` requires a downstream cache-load
-        # detector that doesn't exist yet — aspirational.
         "trusted_path_cache_load",
     ],
     ordered=True,
     same_function=False,
-    # Fire when the two primitives that have detectors today are
-    # present. Allows the chain to surface end-to-end while the other
-    # two primitive detectors are built out.
-    min_primitives=2,
 )
 
 

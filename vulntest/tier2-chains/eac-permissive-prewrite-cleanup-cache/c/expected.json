@@ -9,7 +9,7 @@
     "chain_depth": 4
   },
   "_notes": [
-    "The full EAC chain has 4 primitives. Only the two with implementing detectors today are listed as required findings; the other two (missing_cleanup_on_failure, trusted_path_cache_load) are tracked aspirationally in heuristics/chains.py:EAC_PERMISSIVE_PREWRITE_CACHE.primitives but not separately emitted. The chain template's `min_primitives=2` lets the chain finding fire on the partial set; bring this back to the full 4-primitive expectation when those detectors land."
+    "All 4 EAC chain primitives now have implementing detectors as of 2026-05-07: permissive_sddl (analysis.sddl), pre_verification_write (analysis.integrity_check_order), missing_cleanup_on_failure (analysis.cleanup_dominance), trusted_path_cache_load (analysis.trusted_path). The chain template requires all 4. The cleanup + trusted-path detectors are minimal v1 — coarse-recall, expected to FP on innocuous binaries."
   ],
   "findings": [
     {
@@ -47,6 +47,33 @@
       ]
     },
     {
+      "category": "missing_cleanup_on_failure",
+      "severity": "medium",
+      "function": "wmain",
+      "detector": "analysis.cleanup_dominance",
+      "primitive_index": 3,
+      "knowledge_refs": ["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
+      "cwe": ["CWE-459", "CWE-377"],
+      "description": "WriteFile commits without DeleteFile-class rollback imports",
+      "evidence_signatures": [
+        {"kind": "import", "name": "WriteFile"},
+        {"kind": "no_import", "name": "DeleteFileW"}
+      ]
+    },
+    {
+      "category": "trusted_path_cache_load",
+      "severity": "medium",
+      "detector": "analysis.trusted_path",
+      "primitive_index": 4,
+      "knowledge_refs": ["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
+      "cwe": ["CWE-345", "CWE-426"],
+      "mitre_attack": ["T1574"],
+      "description": "binary references attacker-writable path strings and imports load-class APIs",
+      "evidence_signatures": [
+        {"kind": "string_constant", "value": "Temp"}
+      ]
+    },
+    {
       "category": "chain_pattern",
       "severity": "critical",
       "function": "wmain",
@@ -55,7 +82,7 @@
       "knowledge_refs": ["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
       "cwe": ["CWE-732", "CWE-471"],
       "mitre_attack": ["T1574", "T1068"],
-      "description": "permissive_sddl + pre_verification_write — EAC arbitrary-write chain shape (2/4 primitives present)"
+      "description": "all 4 EAC primitives present — full chain match"
     }
   ]
 }

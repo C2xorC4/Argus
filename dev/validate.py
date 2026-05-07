@@ -27,9 +27,9 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from scripts.lib import BinjaSession, load_config                    # noqa: E402
 from scripts.analysis import (                                       # noqa: E402
-    crypto, heap, integrity_check_order, mitigations, obfuscation,
-    race, sddl, source_surface, surface, taint, types, uninit,
-    windows_drivers,
+    cleanup_dominance, crypto, heap, integrity_check_order,
+    mitigations, obfuscation, race, sddl, source_surface, surface,
+    taint, trusted_path, types, uninit, windows_drivers,
 )
 from scripts.heuristics import chains as heur_chains                 # noqa: E402
 from scripts.triage import auto_triage                               # noqa: E402
@@ -195,13 +195,32 @@ def validate_one(path: Path) -> dict:
         print(f"  ico:     {result['ico_time_s']}s")
         _summarise(ico_findings, "pre-verify-write findings")
 
+        t12 = time.time()
+        cleanup_findings = cleanup_dominance.analyze(
+            session, binary=str(path),
+            arch=result["arch"], platform=result["platform"])
+        result["cleanup_time_s"] = round(time.time() - t12, 2)
+        result["cleanup_findings"] = len(cleanup_findings)
+        print(f"  cleanup: {result['cleanup_time_s']}s")
+        _summarise(cleanup_findings, "missing-cleanup findings")
+
+        t13 = time.time()
+        tpath_findings = trusted_path.analyze(
+            session, binary=str(path),
+            arch=result["arch"], platform=result["platform"])
+        result["tpath_time_s"] = round(time.time() - t13, 2)
+        result["tpath_findings"] = len(tpath_findings)
+        print(f"  tpath:   {result['tpath_time_s']}s")
+        _summarise(tpath_findings, "trusted-path findings")
+
         all_findings = (list(surf_findings) + list(src_findings)
                         + list(taint_findings)
                         + list(heap_findings) + list(crypto_findings)
                         + list(obf_findings) + list(wd_findings)
                         + list(uninit_findings) + list(types_findings)
                         + list(race_findings) + list(sddl_findings)
-                        + list(ico_findings))
+                        + list(ico_findings)
+                        + list(cleanup_findings) + list(tpath_findings))
 
         # Chain-pattern composition (Phase 1 final pass) — match the
         # heuristics/chains.py templates against the per-primitive

@@ -122,6 +122,12 @@ vulntest/known-positive/**/verification.run.*.json
 reports/
 out/
 output/
+# Exception: the `scripts/output/` Python package holds the
+# canonical Finding v2 schema + renderers (finding.py, sarif.py,
+# markdown.py, vendor.py). Those are load-bearing code, not
+# operator findings, and must be tracked.
+!skills/binary-ninja/scripts/output/
+!skills/binary-ninja/scripts/output/**
 
 # ── Compiled VulnTest binaries (kept by tier subdirs that opt in) ──
 vulntest/**/build/
