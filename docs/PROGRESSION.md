@@ -10,9 +10,15 @@ large.
 
 | # | Item | Effort | Status |
 |---|---|---|---|
-| 0.1 | Wider clean-corpus FP sweep (Linux ELF + real-world targets) | half-day | ⏳ in progress |
-| 0.2 | Substrate-coherence check — `jm associate` against new findings, optional `--substrate-check` flag in runner | 1-2h | ⏸️ |
-| 0.3 | Per-module `manual_workflows/<module>.md` for the 10 modules touched in the May 7 session | 1 day | ⏸️ |
+| 0.1 | Wider clean-corpus FP sweep (Linux ELF + real-world targets) | half-day | ✅ done 2026-05-07 (15 Windows binaries, results in `dev/corpus_sweep_2026-05-07.json`) |
+| 0.2 | Substrate-coherence check — `jm associate` against new findings, optional `--substrate-check` flag in runner | 1-2h | ✅ done 2026-05-07 (`runner.py --substrate-check`; fuzzy token-overlap matching) |
+| 0.3 | Per-module `manual_workflows/<module>.md` for the modules touched in the May 7 session | 1 day | ✅ done 2026-05-07 (9 docs: sddl, integrity_check_order, cleanup_dominance, trusted_path, triage, exploit, differ, patch, output-vendor) |
+
+**Pre-existing modules still missing manual_workflow docs** (separate
+follow-on, not session-scope): `uninit`, `types`, `race`,
+`windows_drivers`, `source_surface`, plus user-authored
+`linux_exploit`. Each adds gate-6 readiness for that module
+specifically.
 
 ## Tier 1 — High-impact binary-only (most blackbox runs benefit)
 
