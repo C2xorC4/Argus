@@ -227,6 +227,93 @@ DESERIALIZATION_GADGET_RCE = ChainPattern(
 
 
 # ─────────────────────────────────────────────────────────────────
+# Egg-hunting setup — RWX shellcode exec + PRNG-hidden target address
+# ─────────────────────────────────────────────────────────────────
+
+
+EGG_HUNTING_SETUP = ChainPattern(
+    name="chains.egg_hunting_setup",
+    description=(
+        "RWX shellcode exec primitive + PRNG-hidden target address — "
+        "canonical egg-hunting setup; attacker must scan memory for the "
+        "egg constant (e.g. 'HTB{') using access() page probing; "
+        "alarm(0xFF) required at shellcode start if binary has scan timer"
+    ),
+    severity=Severity.HIGH,
+    category="chain_pattern",
+    cwe=["CWE-94", "CWE-338"],
+    mitre_attack=["T1203"],
+    knowledge_refs=[
+        "[[Memory/Knowledge/linux_egghunting_shellcode]]",
+        "[[Memory/Knowledge/linux_seccomp_filter]]",
+    ],
+    primitives=[
+        "rwx_shellcode_exec",
+        "weak_prng_in_security_path",
+    ],
+    ordered=False,
+    min_primitives=2,
+)
+
+
+# ─────────────────────────────────────────────────────────────────
+# ret2win ROP chain — stack BOF + unreachable win function
+# ─────────────────────────────────────────────────────────────────
+
+
+RET2WIN_ROP_CHAIN = ChainPattern(
+    name="chains.ret2win_rop_chain",
+    description=(
+        "Stack buffer overflow + unreachable win function with file I/O — "
+        "complete ret2win chain; may require pop gadgets for argument setup "
+        "and a ret gadget for SSE stack alignment if win function calls libc"
+    ),
+    severity=Severity.CRITICAL,
+    category="chain_pattern",
+    cwe=["CWE-121", "CWE-94"],
+    mitre_attack=["T1203"],
+    knowledge_refs=[
+        "[[Memory/Knowledge/linux_ret2win_pattern]]",
+    ],
+    primitives=[
+        "stack_buffer_overflow",
+        "ret2win_win_function",
+    ],
+    ordered=False,
+    min_primitives=2,
+)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Scan-resistant egg-hunt — defensive timer + RWX shellcode exec
+# ─────────────────────────────────────────────────────────────────
+
+
+SCAN_RESISTANT_EGG_HUNT = ChainPattern(
+    name="chains.scan_resistant_egg_hunt",
+    description=(
+        "Defensive alarm timer + RWX shellcode exec — scan-resistant binary "
+        "requiring alarm(0xFF) reset at start of any iterative exploit "
+        "primitive (egg-hunt, format-string oracle, brute-force) before "
+        "the SIGALRM countdown kills the process"
+    ),
+    severity=Severity.HIGH,
+    category="chain_pattern",
+    cwe=["CWE-94"],
+    mitre_attack=["T1203"],
+    knowledge_refs=[
+        "[[Memory/Knowledge/linux_egghunting_shellcode]]",
+    ],
+    primitives=[
+        "defensive_alarm_timer",
+        "rwx_shellcode_exec",
+    ],
+    ordered=False,
+    min_primitives=2,
+)
+
+
+# ─────────────────────────────────────────────────────────────────
 # Direct-syscall + TLS callback + hidden thread (malware evasion stack)
 # ─────────────────────────────────────────────────────────────────
 
@@ -266,6 +353,9 @@ PATTERNS: list[Pattern] = [
     TYPECONF_ARBREAD_DEREF,
     DESERIALIZATION_GADGET_RCE,
     MALWARE_EVASION_STACK,
+    EGG_HUNTING_SETUP,
+    RET2WIN_ROP_CHAIN,
+    SCAN_RESISTANT_EGG_HUNT,
 ]
 
 

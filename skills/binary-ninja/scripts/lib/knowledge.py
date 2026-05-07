@@ -10,14 +10,19 @@ by default. Override via the `ARGUS_JM_PATH` env var or the `jm_path`
 argument to each function.
 
 Surface used here:
-- `jm retrieve --intent <intent> --tags <tags> --format json`
-- `jm associate --query <text> --format json --threshold <T>`
+- `jm retrieve -format json -intent <intent> -tags <tags>`
+- `jm associate -format json -threshold <T> -limit <N> "<query>"`
+
+Note: the jm CLI uses Go-style single-dash flags AND requires flags
+to precede the positional query argument. Putting flags after the
+query causes them to be parsed as part of the query string.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -136,18 +141,21 @@ def retrieve(
     `intent` shapes scoring (one of "guidance"/"who"/"what"/"where" or
     a free-text phrase); `tags` narrows by topic. `fmt` is "summary"
     (frontmatter + first lines) or "full" (whole body).
+
+    Flags precede positional args per the jm CLI convention.
     """
-    args = ["retrieve", "--intent", intent, "--format", "json", "--limit", str(limit)]
-    if fmt == "full":
-        args.append("--full")
+    args = ["retrieve", "-format", "json", "-intent", intent]
     if tags:
-        args.extend(["--tags", ",".join(tags)])
+        args.extend(["-tags", ",".join(tags)])
     raw = _run_jm(args, jm_path=jm_path)
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
         raise JmUnavailable(f"jm retrieve returned non-JSON output: {e}") from e
-    entries = data if isinstance(data, list) else data.get("entries", [])
+    if isinstance(data, list):
+        entries = data
+    else:
+        entries = data.get("entries") or data.get("memories") or []
     return [KBEntry.from_dict(e) for e in entries]
 
 
@@ -159,24 +167,60 @@ def associate(
 ) -> list[KBEntry]:
     """Invoke `jm associate` for free-text contextual matching.
 
-    Use for substrate-coherence checks: pass a Finding's category +
-    description and confirm the cited Knowledge entries are top
-    matches.
+    Flags precede the positional query argument — the jm CLI parses
+    later flags as part of the query when the order is reversed.
     """
     args = [
         "associate",
-        "--query", query,
-        "--format", "json",
-        "--threshold", f"{threshold:.2f}",
-        "--limit", str(limit),
+        "-format", "json",
+        "-threshold", f"{threshold:.2f}",
+        "-limit", str(limit),
+        query,
     ]
     raw = _run_jm(args, jm_path=jm_path)
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
         raise JmUnavailable(f"jm associate returned non-JSON output: {e}") from e
-    entries = data if isinstance(data, list) else data.get("entries", [])
+    if isinstance(data, list):
+        entries = data
+    else:
+        # `jm associate` JSON shape uses "associations"; `jm retrieve`
+        # uses "entries" / "memories". Tolerate both.
+        entries = (data.get("associations")
+                   or data.get("entries")
+                   or data.get("memories")
+                   or [])
     return [KBEntry.from_dict(e) for e in entries]
+
+
+_REF_SLUG_RE = re.compile(r"\[\[(?:Memory/)?(?:[^/\]]+/)?([^/\]]+?)(?:\.md)?\]\]")
+_TITLE_NONALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _ref_slug(ref: str) -> str:
+    """Extract the slug from a `[[Memory/Category/slug]]` citation
+    string. Returns the lowercase slug without the `.md` suffix; e.g.
+    `[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]` ->
+    `eac_eos_arbitrary_write_chain`.
+    """
+    if not ref:
+        return ""
+    m = _REF_SLUG_RE.search(ref)
+    if m:
+        return m.group(1).lower()
+    return ref.strip("[]").lower()
+
+
+def _title_to_slug(title: str) -> str:
+    """Slugify a Knowledge entry title for fuzzy matching. Strips
+    punctuation and collapses non-alphanumeric runs to underscores.
+    "EAC EOS arbitrary-write chain — ..." -> "eac_eos_arbitrary_write_chain".
+    """
+    if not title:
+        return ""
+    tail = title.split(" — ")[0]            # drop em-dash subtitle
+    return _TITLE_NONALNUM_RE.sub("_", tail.lower()).strip("_")
 
 
 def verify_finding_citations(
@@ -191,11 +235,30 @@ def verify_finding_citations(
     Run `associate(category + description)` and confirm every entry in
     `cited_refs` appears in the top results above `threshold`.
 
+    `jm associate` JSON output carries `title` but not `path`, so
+    matching is via title-slug overlap: each cited ref's slug
+    (`eac_eos_arbitrary_write_chain`) is checked against the
+    slugified titles of the top results. Substring containment in
+    either direction counts as a match — title slugs and ref slugs
+    diverge slightly (titles often have prefixes / suffixes the slug
+    omits) and either form satisfies the coherence claim.
+
     Returns (all_cited_ranked_well, top_results). If False, the
     detector module's pattern table is mis-cited and should be revisited.
     """
     query = f"{category}: {description}"
     top = associate(query, threshold=threshold, jm_path=jm_path)
-    top_refs = {e.knowledge_ref for e in top}
-    all_present = all(ref in top_refs for ref in cited_refs)
+    top_slugs = [_title_to_slug(e.title) for e in top]
+    all_present = True
+    for ref in cited_refs:
+        slug = _ref_slug(ref)
+        if not slug:
+            continue
+        match = any(
+            slug in ts or ts in slug
+            for ts in top_slugs
+            if ts
+        )
+        if not match:
+            all_present = False
     return all_present, top

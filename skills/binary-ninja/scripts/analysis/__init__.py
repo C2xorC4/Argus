@@ -10,6 +10,7 @@ Phase 1 status:
     obfuscation.py    — packers, entropy, RWX sections, CFF candidates      [done]
     chains.py         — multi-component chain pattern matching              [done]
     attack_surface.py — entry-point -> reachable-sink mapping               [done]
+    linux_exploit.py  — seccomp arg check, alarm timeout, ret2win scan      [done]
 
 Each module exposes:
 
@@ -20,15 +21,15 @@ and consumes patterns from `..heuristics` modules where applicable.
 """
 
 from . import (
-    _il_helpers, attack_surface, chains, crypto, heap, mitigations,
-    obfuscation, source_surface, surface, taint, windows_drivers,
+    _il_helpers, attack_surface, chains, crypto, heap, linux_exploit,
+    mitigations, obfuscation, source_surface, surface, taint, windows_drivers,
 )
 from .surface import SectionInfo, TargetProfile, analyze, build_profile
 
 __all__ = [
     "surface", "mitigations", "taint", "heap",
     "crypto", "obfuscation", "chains", "attack_surface",
-    "windows_drivers", "source_surface",
+    "windows_drivers", "source_surface", "linux_exploit",
     "_il_helpers",
     "SectionInfo", "TargetProfile",
     "analyze", "build_profile",

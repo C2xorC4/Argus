@@ -46,6 +46,8 @@ The Knowledge-to-module mapping (Phase 1.1):
     chains.py      — eac_eos_arbitrary_write_chain,
                      ue5_server_crash_chain_prng_fstring,
                      ue5_fstring_allocation_amplification
+    linux_exploit.py — linux_seccomp_filter, linux_egghunting_shellcode,
+                     linux_ret2win_pattern (gaps 1-3, 6-8)
     arch.py        — a64_*, wnapi_segment_register_teb_bootstrap,
                      wnapi_peb_teb_structures, em_peb_antidebug_fields
     hooking.py     — gh_hooking_techniques_d3d_iat_vft,
@@ -62,6 +64,7 @@ from . import (
     imports,
     injection,
     known_vulnerable_patterns,
+    linux_exploit,
     mitigations,
     obfuscation,
     rootkit,
@@ -99,6 +102,7 @@ ALL_MODULES = (
     arch,
     hooking,
     known_vulnerable_patterns,
+    linux_exploit,
 )
 
 
@@ -129,5 +133,6 @@ __all__ = [
     "imports", "syscalls", "injection", "evasion",
     "rootkit", "crypto", "mitigations", "obfuscation",
     "arch", "hooking", "chains", "known_vulnerable_patterns",
+    "linux_exploit",
     "ALL_MODULES", "match_all",
 ]

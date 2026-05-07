@@ -32,12 +32,16 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from scripts.lib import BinjaSession, load_config                    # noqa: E402
 from scripts.analysis import (                                       # noqa: E402
-    cleanup_dominance, crypto, heap, integrity_check_order, obfuscation,
-    race, sddl, surface, taint, trusted_path, types, uninit,
+    cleanup_dominance, crypto, heap, integrity_check_order, linux_exploit,
+    obfuscation, race, sddl, surface, taint, trusted_path, types, uninit,
     windows_drivers,
 )
 from scripts.heuristics import chains as heur_chains                 # noqa: E402
 from scripts.heuristics._base import imports_in, strings_in          # noqa: E402
+from scripts.lib.knowledge import (                                  # noqa: E402
+    JmUnavailable,
+    verify_finding_citations,
+)
 from scripts.triage import auto_triage                               # noqa: E402
 from scripts.exploit import compose_pocs                             # noqa: E402
 
@@ -55,6 +59,7 @@ DETECTORS = [
     ("integrity_check_order", integrity_check_order),
     ("cleanup_dominance", cleanup_dominance),
     ("trusted_path", trusted_path),
+    ("linux_exploit", linux_exploit),
 ]
 
 
@@ -334,6 +339,10 @@ def main(argv: list[str]) -> int:
                     help="Additional binary paths to scan (no expected.json)")
     ap.add_argument("--json-out", type=Path, default=None,
                     help="Write structured results JSON to this path")
+    ap.add_argument("--substrate-check", action="store_true",
+                    help=("Run substrate-coherence check (jm associate) "
+                          "against each finding's knowledge_refs; report "
+                          "incoherent citations per cell."))
     args = ap.parse_args(argv[1:])
 
     vulntest_root = Path(__file__).resolve().parent
@@ -354,6 +363,44 @@ def main(argv: list[str]) -> int:
             results.append(r)
         except Exception as e:
             print(f"  [error] {cell_path}: {type(e).__name__}: {e}")
+
+    if args.substrate_check:
+        print("\n=== substrate-coherence check ===")
+        coherent = incoherent = skipped_sc = err_sc = 0
+        per_cell_incoherent: dict[str, list[str]] = {}
+        for r in results:
+            cell_label = str(r.cell_dir.relative_to(vulntest_root))
+            for f in r.vuln_findings:
+                refs = list(getattr(f, "knowledge_refs", []) or [])
+                if not refs:
+                    skipped_sc += 1
+                    continue
+                try:
+                    ok, top = verify_finding_citations(
+                        category=getattr(f, "category", ""),
+                        description=getattr(f, "description", "") or "",
+                        cited_refs=refs,
+                    )
+                except JmUnavailable as e:
+                    err_sc += 1
+                    print(f"  [warn] jm: {e}")
+                    break
+                except Exception:
+                    err_sc += 1
+                    continue
+                if ok:
+                    coherent += 1
+                else:
+                    incoherent += 1
+                    top_refs = [e.knowledge_ref for e in top[:3]]
+                    msg = (f"{f.category}@0x{f.address:x} cited={refs} "
+                           f"top3={top_refs}")
+                    per_cell_incoherent.setdefault(cell_label, []).append(msg)
+        for cell, msgs in per_cell_incoherent.items():
+            for m in msgs:
+                print(f"  INCOHERENT  {cell}  {m}")
+        print(f"  coherent={coherent}  incoherent={incoherent}  "
+              f"skipped(no_refs)={skipped_sc}  err={err_sc}")
 
     print("\n=== summary ===")
     fails = 0
