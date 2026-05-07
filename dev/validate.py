@@ -32,6 +32,7 @@ from scripts.analysis import (                                       # noqa: E40
     windows_drivers,
 )
 from scripts.heuristics import chains as heur_chains                 # noqa: E402
+from scripts.triage import auto_triage                               # noqa: E402
 from scripts.exploit import compose_pocs                             # noqa: E402
 
 
@@ -218,6 +219,18 @@ def validate_one(path: Path) -> dict:
             all_findings.extend(chain_findings)
             print(f"  chains:  {len(chain_findings)} chain(s) matched")
             _summarise(chain_findings, "chain findings")
+
+        # Triage — auto-promote DETECTED → CONFIRMED so PoC composition
+        # has eligible primitives to consume. Production triage will
+        # layer reachability + mitigation gates on top of the
+        # confidence-threshold default.
+        try:
+            promoted = auto_triage(all_findings)
+        except Exception as e:
+            print(f"  [warn] auto_triage: {type(e).__name__}: {e}")
+            promoted = 0
+        if promoted:
+            print(f"  triage:  {promoted} findings DETECTED → CONFIRMED")
 
         # Phase 3 PoC composition — read the chain findings + their
         # contributing per-primitive findings, build PoC skeletons,

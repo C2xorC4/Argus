@@ -86,10 +86,20 @@ UE5_PRNG_COOKIE_AMPLIFICATION = ChainPattern(
     ],
     primitives=[
         "weak_prng_in_security_path",
+        # `signed_token_with_recoverable_secret` would correlate the
+        # PRNG output with HMAC / signature material. Aspirational —
+        # no detector today.
         "signed_token_with_recoverable_secret",
+        # `size_amplification` would detect FString-style
+        # allocate-then-fill-from-untrusted-size patterns. Currently
+        # the heap-OF detector covers part of this; deferred until a
+        # dedicated detector lands.
         "size_amplification",
     ],
     ordered=True,
+    # Only `weak_prng_in_security_path` has an implementing detector
+    # as of 2026-05-07; raise this to 3 when the other two land.
+    min_primitives=1,
 )
 
 

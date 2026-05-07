@@ -7,36 +7,35 @@
     "difficulty": 23,
     "chain_depth": 3
   },
+  "_notes": [
+    "The full UE5 chain has 3 primitives. Only `weak_prng_in_security_path` has an implementing detector today; `signed_token_with_recoverable_secret` and `size_amplification` are tracked aspirationally in heuristics/chains.py:UE5_PRNG_COOKIE_AMPLIFICATION.primitives but not separately emitted. The chain template's `min_primitives=1` lets the chain finding fire on the partial set; raise this to 3 when those detectors land."
+  ],
   "findings": [
     {
       "category": "weak_prng_in_security_path",
-      "severity": "critical",
+      "severity": "high",
+      "function": "update_handshake_secret",
+      "detector": "analysis.crypto",
       "primitive_index": 1,
       "knowledge_refs": ["[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]"],
-      "cwe": ["CWE-338"]
-    },
-    {
-      "category": "signed_token_with_recoverable_secret",
-      "severity": "critical",
-      "primitive_index": 2,
-      "knowledge_refs": ["[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]"],
-      "cwe": ["CWE-345"]
-    },
-    {
-      "category": "size_amplification",
-      "severity": "high",
-      "primitive_index": 3,
-      "knowledge_refs": ["[[Memory/Knowledge/ue5_fstring_allocation_amplification]]"],
-      "cwe": ["CWE-405", "CWE-770"]
+      "cwe": ["CWE-338", "CWE-330"],
+      "mitre_attack": ["T1600"],
+      "description": "mt19937 seeded from system_clock used to fill HandshakeSecret buffer"
     },
     {
       "category": "chain_pattern",
       "severity": "critical",
-      "detector": "analysis/chains.py",
-      "chain_name": "prng-cookie-amplification",
-      "knowledge_refs": ["[[Memory/Knowledge/ue5_server_crash_chain_prng_fstring]]"],
+      "function": "HandshakeState",
+      "detector": "heuristics.chains",
+      "chain_name": "chains.ue5_prng_cookie_amplification",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/ue5_server_crash_chain_prng_fstring]]",
+        "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]",
+        "[[Memory/Knowledge/ue5_fstring_allocation_amplification]]"
+      ],
+      "cwe": ["CWE-338", "CWE-345", "CWE-770"],
       "mitre_attack": ["T1499"],
-      "description": "Composition matches UE5 PRNG → cookie-forge → amplification chain"
+      "description": "weak_prng_in_security_path — UE5 PRNG → cookie-forge → amplification chain (1/3 primitives present)"
     }
   ]
 }

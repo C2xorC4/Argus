@@ -108,17 +108,25 @@ def _user_facing_identifier(name: str) -> Optional[str]:
     if base.startswith("?_") or base.startswith("?$"):
         return None
     if base.startswith("?"):
-        end = base.find("@@")
-        if end > 1:
-            primary = base[1:end]
-        else:
-            end = base.find("@")
-            if end <= 1:
-                return None
-            primary = base[1:end]
-            rest = base[end + 1:]
-            if rest.startswith("?$") or rest.startswith("?_"):
-                return None
+        # MSVC mangling: primary identifier sits between the leading
+        # `?` and the FIRST `@`. After the first `@`, either:
+        #   - another `@` follows immediately (free function:
+        #     `?Name@@signature`)
+        #   - a class/namespace scope precedes `@@`
+        #     (`?Name@Class@@signature`)
+        # The earlier `find("@@")` form jumped over the class scope
+        # and pulled `Name@Class` in as the primary, which then fails
+        # the identifier regex. Use the first `@` consistently.
+        first_at = base.find("@")
+        if first_at <= 1:
+            return None
+        primary = base[1:first_at]
+        rest = base[first_at + 1:]
+        # If the class scope is std-internal / template-internal,
+        # reject the whole symbol.
+        if (rest and not rest.startswith("@")
+                and (rest.startswith("?$") or rest.startswith("?_"))):
+            return None
     else:
         primary = base
     if not _PRIMARY_NAME_RE.match(primary):

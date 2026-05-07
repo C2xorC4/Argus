@@ -37,6 +37,7 @@ from scripts.analysis import (                                       # noqa: E40
 )
 from scripts.heuristics import chains as heur_chains                 # noqa: E402
 from scripts.heuristics._base import imports_in, strings_in          # noqa: E402
+from scripts.triage import auto_triage                               # noqa: E402
 from scripts.exploit import compose_pocs                             # noqa: E402
 
 
@@ -128,11 +129,17 @@ def run_pipeline(binary_path: Path) -> tuple[list, dict[str, float], dict]:
             print(f"      [warn] chain match: {type(e).__name__}: {e}")
             chain_findings = []
         try:
+            promoted = auto_triage(findings)
+        except Exception as e:
+            print(f"      [warn] auto_triage: {type(e).__name__}: {e}")
+            promoted = 0
+        try:
             pocs = compose_pocs(findings)
         except Exception as e:
             print(f"      [warn] compose_pocs: {type(e).__name__}: {e}")
             pocs = []
         times["chains"] = len(chain_findings)
+        times["triaged"] = promoted
         times["pocs"] = len(pocs)
 
     times["total"] = round(time.time() - t_total, 2)
