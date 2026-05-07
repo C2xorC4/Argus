@@ -201,34 +201,57 @@ Gate verdicts (Phase 3 is scaffolding — most gates N/A or partial):
 
 ## Per-detector clean-corpus FP sweep (2026-05-07)
 
-`analysis/cleanup_dominance.py` and `analysis/trusted_path.py` are
-v1 / coarse-recall detectors. Sweep against eight Windows system
-binaries:
+Run via `dev/clean_corpus_sweep.py` against 15 Microsoft-signed
+Windows System32 binaries: `utilman, sethc, osk, notepad, calc,
+xcopy, where, whoami, hostname, fc, find, reg, sc, tasklist, cmd`.
+Results JSON: `dev/corpus_sweep_2026-05-07.json`. Per-detector
+totals across the corpus:
 
-| Target | `cleanup_dominance` | `trusted_path_cache_load` |
-|---|---|---|
-| utilman.exe | 0 | 0 |
-| sethc.exe | 0 | 0 |
-| osk.exe | 0 | 0 |
-| notepad.exe | **1** | 0 |
-| calc.exe | 0 | 0 |
-| xcopy.exe | 0 | 0 |
-| where.exe | 0 | 0 |
-| whoami.exe | 0 | 0 |
-| **TOTAL** | **1** | **0** |
+| Detector | Total findings | Targets affected | Gate 2 |
+|---|---|---|---|
+| `sddl` | 0 | 0 | ✅ CLEAN |
+| `trusted_path` | 0 | 0 | ✅ CLEAN |
+| `windows_drivers` | 0 | 0 | ✅ CLEAN (no driver targets in corpus — vacuously clean) |
+| `uninit` | 0 | 0 | ✅ CLEAN |
+| `types` | 0 | 0 | ✅ CLEAN |
+| `obfuscation` | 1 | notepad.exe (1) | ⚠️ low — 1 finding worth per-call review |
+| `crypto` | 2 | cmd.exe (2) | ⚠️ low — 2 findings; cmd.exe has crypto markers (token / hash routines) |
+| `race` | 6 | utilman, notepad, cmd | ⚠️ medium — TOCTOU detector firing on file-handle race patterns; needs per-finding review |
+| `cleanup_dominance` | 12 | notepad (1), reg (2), sc (6), cmd (3) | ⚠️ v1 documented FP class — commit-without-rollback-import structural pattern |
+| `integrity_check_order` | 13 | notepad, reg, sc, cmd | ⚠️ **v4 gap surfaced** — see below |
+| `surface` | 13 | 8 binaries | ⚠️ recon-stage findings (mitigation absences); not strict bugs |
+| `heap` | 16 | 6 binaries | ⚠️ heap-allocator-pattern recall is high by design |
+| `taint` | 83 | 5 binaries | ⚠️ taint is high-recall by design; per-finding triage required for promotion |
 
-The `cleanup_dominance` finding on `notepad.exe` is a known v1 FP
-class — notepad calls `WriteFile` without `DeleteFileW`, which
-matches the structural heuristic but isn't a security issue
-(notepad isn't a privileged write-then-verify pattern). Documented
-in the module docstring; Phase 2 V2 will tighten with a verify-
-call-presence gate (commit + no rollback + verify call elsewhere
-in function ⇒ EAC-class; commit + no rollback + no verify ⇒
-benign-write — no emit).
+**v4 gap surfaced for `integrity_check_order`:** the v3 detector
+emits `pre_verification_write` when a function commits, has a
+conditional, and lacks both a dominating rollback AND a dominating
+verify call. The third clause is too permissive — a function that
+simply writes data with no verify call AT ALL still fires, because
+no verify dominates the commit (vacuously). On binaries like
+`reg.exe` / `sc.exe` / `cmd.exe`, this fires on routine file
+operations that aren't the commit-then-verify shape at all. The
+v4 fix: emit only when SOME verify-flavoured call exists in the
+function (regardless of dominance position). If no verify exists,
+the structural concern is "commit without cleanup" —
+`cleanup_dominance`'s job, not `pre_verification_write`'s. This
+removes ~13 FPs from the v3 detector and tightens the semantic
+distinction between the two modules.
 
-`trusted_path_cache_load` is clean against this corpus; the coarse
-v1 form (binary-scope path-string + load-API combo) didn't match any
-of the eight system binaries.
+**Promotion-readiness updated by this sweep:**
+
+- ✅ Gate 2 CLEAN: `sddl`, `trusted_path`, `windows_drivers`,
+  `uninit`, `types`. These detectors can advance to promotion
+  review immediately on gate-2 grounds.
+- ⚠️ Gate 2 PARTIAL: `cleanup_dominance` v1 (documented),
+  `integrity_check_order` v3 (newly surfaced v4 gap above), `race`,
+  `crypto`, `obfuscation`. Each needs per-finding triage or a
+  documented v2 to clear gate 2.
+- ⚠️ Gate 2 BLOCKED at recall-level: `taint`, `heap`, `surface`.
+  These are upstream-feed detectors; their FP rate at scale is
+  expected. Gate 2 promotion requires either a precision-improving
+  v2 OR an explicit "high-recall feed for chain composition" carve-
+  out in LIFECYCLE.md.
 
 ## Promotion-readiness summary
 
