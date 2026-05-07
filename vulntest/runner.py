@@ -43,7 +43,7 @@ from scripts.lib.knowledge import (                                  # noqa: E40
     verify_finding_citations,
 )
 from scripts.triage import auto_triage                               # noqa: E402
-from scripts.exploit import compose_pocs                             # noqa: E402
+from scripts.exploit import build as build_pocs                      # noqa: E402
 
 
 DETECTORS = [
@@ -142,7 +142,11 @@ def run_pipeline(binary_path: Path) -> tuple[list, dict[str, float], dict]:
             print(f"      [warn] auto_triage: {type(e).__name__}: {e}")
             promoted = 0
         try:
-            pocs = compose_pocs(findings)
+            pocs = build_pocs(session, findings,
+                              binary=str(binary_path), arch=arch, platform=platform)
+            for poc in pocs:
+                if getattr(poc, "exploit_script", None):
+                    print(f"      [poc] {poc.chain_name} — exploit script generated")
         except Exception as e:
             print(f"      [warn] compose_pocs: {type(e).__name__}: {e}")
             pocs = []
@@ -392,9 +396,9 @@ def main(argv: list[str]) -> int:
                     coherent += 1
                 else:
                     incoherent += 1
-                    top_refs = [e.knowledge_ref for e in top[:3]]
+                    top_titles = [e.title[:60] for e in top[:3]]
                     msg = (f"{f.category}@0x{f.address:x} cited={refs} "
-                           f"top3={top_refs}")
+                           f"top3_titles={top_titles}")
                     per_cell_incoherent.setdefault(cell_label, []).append(msg)
         for cell, msgs in per_cell_incoherent.items():
             for m in msgs:
