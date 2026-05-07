@@ -120,6 +120,22 @@ _UE5_COMMIT_TOKENS: tuple[str, ...] = (
 )
 
 
+# Verify-name tokens used to recognise USER-defined verify wrappers
+# whose presence-as-a-dominating-call exonerates the commit. The v3
+# order check: a verify-flavoured call that dominates the commit
+# means the commit is guarded by upstream verification (the safe
+# verify-then-write pattern), not the EAC commit-then-verify
+# vulnerability. Tokens are matched case-insensitively against the
+# bare callee name.
+_VERIFY_NAME_TOKENS: tuple[str, ...] = (
+    "verify", "validate", "validat",
+    "is_valid", "isvalid",
+    "authenticate", "authentic",
+    "checksum", "digest", "hmac", "hash_",
+    "compare_",
+)
+
+
 # Verify-class imports — calls that imply integrity verification is
 # happening near the commit. Used to UPGRADE confidence: a function
 # that commits + (later) verifies is a stronger signal than commit
@@ -244,6 +260,97 @@ def _function_has_conditional(func) -> bool:
     return False
 
 
+def _verify_call_dominates_commit(bv, func, commit_addr: int) -> bool:
+    """v3 order check — a verify-flavoured call dominates the commit.
+
+    The canonical commit-before-verify vulnerability has any verify
+    call AFTER the commit (or no verify at all). The verify-then-
+    write safe pattern has at least one verify-flavoured call whose
+    basic block dominates the commit's basic block.
+
+    "Verify-flavoured" = (a) a call to anything in `_VERIFY_IMPORTS`,
+    or (b) a call whose callee name contains a `_VERIFY_NAME_TOKENS`
+    substring (case-insensitive). The latter handles user-defined
+    verify wrappers (e.g. `verify_bytes`, `validate_payload`) that
+    aren't imports.
+
+    Uses Function-level basic blocks (not MLIL blocks) for the
+    dominance query — Function blocks are address-indexed and avoid
+    the MLIL-instruction-range lookup ambiguity that surfaced when
+    MLIL reorders instructions across basic blocks.
+
+    Returns True when a verify call dominates the commit and the
+    detector should suppress this site.
+    """
+    if bv is None:
+        return False
+    source_func = getattr(func, "source_function", None) or func
+    if not hasattr(source_func, "get_basic_block_at"):
+        return False
+    commit_bbs = source_func.get_basic_block_at(commit_addr)
+    commit_block = commit_bbs[0] if isinstance(commit_bbs, list) and commit_bbs else commit_bbs
+    if not commit_block:
+        return False
+
+    ssa = _to_ssa(func)
+    if ssa is None:
+        return False
+    verify_imports_lc = {n.lower() for n in _VERIFY_IMPORTS}
+    try:
+        for inst in ssa.instructions:
+            op_name = type(inst).__name__
+            if "Call" not in op_name:
+                continue
+            call_addr = int(getattr(inst, "address", 0))
+            if call_addr == commit_addr:
+                continue
+            dest = getattr(inst, "dest", None)
+            cval = getattr(dest, "constant", None) if dest else None
+            if cval is None:
+                continue
+            sym = bv.get_symbol_at(int(cval))
+            if sym is None:
+                continue
+            raw = (getattr(sym, "short_name", None) or sym.name or "")
+            if not raw:
+                continue
+            bare = raw[len("__imp_"):] if raw.startswith("__imp_") else raw
+            bare_lc = bare.lower()
+            is_verify = (
+                bare_lc in verify_imports_lc
+                or any(tok in bare_lc for tok in _VERIFY_NAME_TOKENS)
+            )
+            if not is_verify:
+                continue
+
+            call_bbs = source_func.get_basic_block_at(call_addr)
+            call_block = call_bbs[0] if isinstance(call_bbs, list) and call_bbs else call_bbs
+            if not call_block:
+                continue
+
+            dominates = False
+            cb_start = getattr(call_block, "start", None)
+            xb_start = getattr(commit_block, "start", None)
+            if (cb_start is not None and xb_start is not None
+                    and cb_start == xb_start):
+                # Same logical block — `get_basic_block_at` returns
+                # fresh wrappers per call so identity (`is`) is unreliable.
+                dominates = call_addr < commit_addr
+            else:
+                doms = getattr(commit_block, "dominators", None)
+                if doms is not None:
+                    try:
+                        dominates = call_block in doms
+                    except Exception:
+                        dominates = False
+
+            if dominates:
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def _rollback_dominates_all_exits_after_commit(func, commit_addr: int,
                                                rollback_call_sites: list[int]
                                                ) -> bool:
@@ -346,6 +453,15 @@ def find_pre_verification_writes(bv, *, binary: str, arch: str, platform: str,
             if fkey in seen_function_keys:
                 continue
             seen_function_keys.add(fkey)
+
+            # v3 order check first: if a verify-flavoured call dominates
+            # the commit, the commit is in a verify-then-write pattern
+            # (safe), not the EAC commit-then-verify vulnerability.
+            # Catches user-defined verify wrappers (verify_bytes,
+            # validate_payload) that aren't imports — the v1/v2 logic
+            # missed these and fired on remediation cells.
+            if _verify_call_dominates_commit(bv, func, addr):
+                continue
 
             call_set = _function_call_set(bv, func)
             # v2: CFG-path-sensitive rollback check.

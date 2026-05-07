@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "iv-reuse",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 10
+  },
+  "findings": [
+    {
+      "category": "iv_reuse",
+      "severity": "high",
+      "function": "wmain",
+      "detector": "analysis.crypto",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]"
+      ],
+      "cwe": ["CWE-329", "CWE-323"],
+      "mitre_attack": ["T1600"],
+      "description": "shared static IV buffer passed to two BCryptEncrypt call sites",
+      "evidence_signatures": [
+        {"kind": "import", "name": "BCryptEncrypt"},
+        {"kind": "iv_identity_shared_across_init_calls"}
+      ]
+    }
+  ]
+}

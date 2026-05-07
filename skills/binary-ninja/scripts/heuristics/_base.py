@@ -139,9 +139,14 @@ class StructuralPattern(Pattern):
 class ChainPattern(Pattern):
     """Multi-primitive composition.
 
-    `primitives` is an ordered list of primitive Pattern.name values
-    (or category names) that must all be detected in the same binary,
-    optionally with ordering constraints.
+    `primitives` is an ordered list of primitive `Finding.category`
+    values that must be present in the binary's findings.
+
+    `min_primitives` lets a chain template aspirationally list more
+    primitives than have implemented detectors today. The chain emits
+    when at least `min_primitives` of `primitives` are present (default:
+    all). Use this to keep the canonical chain shape documented while
+    letting the chain fire on the subset that's currently detectable.
 
     Used by `analysis/chains.py` to compose Tier-1 findings into
     Tier-2 chain emissions.
@@ -150,6 +155,7 @@ class ChainPattern(Pattern):
     primitives: list[str] = field(default_factory=list)
     ordered: bool = True
     same_function: bool = False
+    min_primitives: Optional[int] = None
 
 
 # ─────────────────────────────────────────────────────────────────

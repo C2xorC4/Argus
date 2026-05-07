@@ -29,6 +29,7 @@ Each row links to a cell's `README.md` (challenge brief).
 | Permissive SDDL on named IPC (Win) | `[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]` | [10](tier1-single/permissive-sddl/c/) | [10](tier1-single/permissive-sddl/cpp/) | — | — | — |
 | NULL-DACL on IPC (Win) | `[[Memory/Knowledge/gameguard_research_22_findings]]` | [10](tier1-single/null-dacl/c/) | [10](tier1-single/null-dacl/cpp/) | — | — | — |
 | Pre-verification write w/ no cleanup (Win) | `[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]` | [10](tier1-single/pre-verify-write/c/) | [10](tier1-single/pre-verify-write/cpp/) | — | — | — |
+| IV reuse (Win) | `[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]` | [10](tier1-single/iv-reuse/c/) | — | — | — | — |
 | Direct-syscall stub (Win) | `[[Memory/Knowledge/em_direct_syscall_ssn_resolution]]` | [10](tier1-single/direct-syscall/c/) | [10](tier1-single/direct-syscall/cpp/) | — | — | — |
 | TLS-callback first-stage (Win) | `[[Memory/Knowledge/em_covert_execution_tls_seh]]` | [10](tier1-single/tls-callback/c/) | [10](tier1-single/tls-callback/cpp/) | — | — | — |
 | SEH/VEH handler abuse (Win) | `[[Memory/Knowledge/em_veh_hwbp_hook_evasion]]` | [10](tier1-single/seh-veh-abuse/c/) | [10](tier1-single/seh-veh-abuse/cpp/) | — | — | — |

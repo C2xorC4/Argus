@@ -78,11 +78,26 @@ def _as_mlil_function(function):
 
 
 def mlil_basic_block_at(function, addr: int):
-    """Return the MLIL basic block containing `addr`, or None.
+    """Return the MLIL basic block whose instructions include `addr`,
+    or None.
 
-    Walks the function's MLIL basic blocks and returns the first
-    whose address range contains `addr`. Tolerant of either
+    Walks each block's instructions and returns the block containing
+    an instruction whose address equals `addr`. Tolerant of either
     `Function` or `MediumLevelILFunction` inputs.
+
+    Earlier revisions used `block.instruction_range` to compute an
+    [inst_start_addr, inst_end_addr] span and short-circuit on
+    range membership. That fast-path is unsafe: MLIL instructions
+    within a basic block need not be address-monotonic (compilers
+    can interleave bytecode addresses across blocks for hot/cold
+    splitting, exception unwinders, or COMDAT-folded calls), so the
+    range check can either (a) falsely match an addr that's
+    physically inside one block's [first_addr, last_addr] span but
+    actually belongs to a different block whose instructions weave
+    through that range, or (b) miss an addr that's outside the
+    [first_addr, last_addr] span but is genuinely an instruction in
+    that block. The instruction walk avoids both classes — exact
+    address match is unambiguous.
     """
     mlil = _as_mlil_function(function)
     if mlil is None:
@@ -92,26 +107,8 @@ def mlil_basic_block_at(function, addr: int):
         return None
     for block in blocks:
         try:
-            start = int(getattr(block, "start", 0))
-            end = int(getattr(block, "end", 0))
-            # MLIL block bounds are instruction indices, not addresses,
-            # in some Binja versions. Try both modes — first the
-            # address-range mode, then the instruction-walk mode.
-            if hasattr(block, "instruction_range"):
-                rng = block.instruction_range
-                low = int(getattr(rng, "start", start))
-                high = int(getattr(rng, "end", end))
-                # Map MLIL indices through to addresses
-                inst_start = mlil[low].address if low < len(mlil) else None
-                inst_end = mlil[high - 1].address if 0 < high <= len(mlil) else None
-                if inst_start is not None and inst_end is not None:
-                    if int(inst_start) <= addr <= int(inst_end):
-                        return block
-                    continue
-            # Walk the block's instructions and match by address
             for inst in block:
-                inst_addr = int(getattr(inst, "address", 0))
-                if inst_addr == addr:
+                if int(getattr(inst, "address", -1)) == addr:
                     return block
         except Exception:
             continue

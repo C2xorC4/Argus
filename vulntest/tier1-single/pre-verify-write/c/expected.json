@@ -12,7 +12,7 @@
       "category": "pre_verification_write",
       "severity": "high",
       "function": "wmain",
-      "detector": "analysis/chains.py",
+      "detector": "analysis.integrity_check_order",
       "knowledge_refs": [
         "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"
       ],

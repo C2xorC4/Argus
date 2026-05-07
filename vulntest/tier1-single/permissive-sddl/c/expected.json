@@ -12,7 +12,7 @@
       "category": "permissive_sddl",
       "severity": "high",
       "function": "wmain",
-      "detector": "analysis/surface.py",
+      "detector": "analysis.sddl",
       "knowledge_refs": [
         "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]",
         "[[Memory/Knowledge/gameguard_research_22_findings]]"

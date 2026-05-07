@@ -10,8 +10,8 @@
     {
       "category": "weak_prng_in_security_path",
       "severity": "high",
-      "function": "issue_token()",
-      "detector": "analysis/crypto.py",
+      "function": "issue_token",
+      "detector": "analysis.crypto",
       "knowledge_refs": [
         "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]"
       ],

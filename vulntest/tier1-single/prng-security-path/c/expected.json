@@ -11,7 +11,7 @@
       "category": "weak_prng_in_security_path",
       "severity": "high",
       "function": "issue_token",
-      "detector": "analysis/crypto.py",
+      "detector": "analysis.crypto",
       "knowledge_refs": [
         "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]"
       ],
@@ -21,7 +21,7 @@
       "evidence_signatures": [
         {"kind": "import", "name": "rand"},
         {"kind": "import", "name": "srand"},
-        {"kind": "import", "name": "time"},
+        {"kind": "import_any", "names": ["time", "_time64", "time64"]},
         {"kind": "data_flow", "source": "rand", "sink": "session_token"}
       ]
     }

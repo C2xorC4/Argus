@@ -46,11 +46,21 @@ EAC_PERMISSIVE_PREWRITE_CACHE = ChainPattern(
     primitives=[
         "permissive_sddl",
         "pre_verification_write",
+        # `missing_cleanup_on_failure` is currently subsumed by the
+        # v3 pre_verification_write detector (the rollback-dominance
+        # check is part of pre_verify_write's emission gate). Listed
+        # here for documentation; not separately emitted today.
         "missing_cleanup_on_failure",
+        # `trusted_path_cache_load` requires a downstream cache-load
+        # detector that doesn't exist yet — aspirational.
         "trusted_path_cache_load",
     ],
     ordered=True,
     same_function=False,
+    # Fire when the two primitives that have detectors today are
+    # present. Allows the chain to surface end-to-end while the other
+    # two primitive detectors are built out.
+    min_primitives=2,
 )
 
 
@@ -272,7 +282,10 @@ def match(bv, *, binary: str, arch: str, platform: str,
     for chain in PATTERNS:
         if not isinstance(chain, ChainPattern):
             continue
-        if not all(p in seen_categories for p in chain.primitives):
+        matched_prims = [p for p in chain.primitives if p in seen_categories]
+        required = (chain.min_primitives if chain.min_primitives is not None
+                    else len(chain.primitives))
+        if len(matched_prims) < required:
             continue
         # Anchor the chain finding at the first matching primitive
         anchor = next(

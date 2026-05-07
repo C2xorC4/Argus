@@ -31,6 +31,8 @@ from scripts.analysis import (                                       # noqa: E40
     race, sddl, source_surface, surface, taint, types, uninit,
     windows_drivers,
 )
+from scripts.heuristics import chains as heur_chains                 # noqa: E402
+from scripts.exploit import compose_pocs                             # noqa: E402
 
 
 DEFAULT_TARGETS = [
@@ -199,6 +201,39 @@ def validate_one(path: Path) -> dict:
                         + list(uninit_findings) + list(types_findings)
                         + list(race_findings) + list(sddl_findings)
                         + list(ico_findings))
+
+        # Chain-pattern composition (Phase 1 final pass) — match the
+        # heuristics/chains.py templates against the per-primitive
+        # findings gathered above and append composite chain findings.
+        try:
+            chain_findings = heur_chains.match(
+                session.bv, binary=str(path),
+                arch=result["arch"], platform=result["platform"],
+                existing_findings=all_findings,
+            )
+        except Exception as e:
+            print(f"  [warn] chain match: {type(e).__name__}: {e}")
+            chain_findings = []
+        if chain_findings:
+            all_findings.extend(chain_findings)
+            print(f"  chains:  {len(chain_findings)} chain(s) matched")
+            _summarise(chain_findings, "chain findings")
+
+        # Phase 3 PoC composition — read the chain findings + their
+        # contributing per-primitive findings, build PoC skeletons,
+        # transition CONFIRMED → IMPACT_PENDING on consumed primitives.
+        try:
+            pocs = compose_pocs(all_findings)
+        except Exception as e:
+            print(f"  [warn] compose_pocs: {type(e).__name__}: {e}")
+            pocs = []
+        result["pocs"] = len(pocs)
+        if pocs:
+            print(f"  pocs:    {len(pocs)} PoC skeleton(s)")
+            for p in pocs:
+                kinds = ", ".join(pr.kind for pr in p.primitives)
+                print(f"    {p.chain_name}: [{kinds}]")
+
         result["total_findings"] = len(all_findings)
         result["total_time_s"] = round(time.time() - t0, 2)
 

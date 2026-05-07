@@ -8,43 +8,54 @@
     "difficulty": 24,
     "chain_depth": 4
   },
+  "_notes": [
+    "The full EAC chain has 4 primitives. Only the two with implementing detectors today are listed as required findings; the other two (missing_cleanup_on_failure, trusted_path_cache_load) are tracked aspirationally in heuristics/chains.py:EAC_PERMISSIVE_PREWRITE_CACHE.primitives but not separately emitted. The chain template's `min_primitives=2` lets the chain finding fire on the partial set; bring this back to the full 4-primitive expectation when those detectors land."
+  ],
   "findings": [
     {
       "category": "permissive_sddl",
       "severity": "high",
+      "function": "wmain",
+      "detector": "analysis.sddl",
       "primitive_index": 1,
-      "knowledge_refs": ["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
-      "cwe": ["CWE-732"]
+      "knowledge_refs": [
+        "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]",
+        "[[Memory/Knowledge/gameguard_research_22_findings]]"
+      ],
+      "cwe": ["CWE-732"],
+      "mitre_attack": ["T1068"],
+      "description": "named pipe created with SDDL granting Everyone GENERIC_ALL",
+      "evidence_signatures": [
+        {"kind": "import", "name": "ConvertStringSecurityDescriptorToSecurityDescriptorW"},
+        {"kind": "import", "name": "CreateNamedPipeW"},
+        {"kind": "string_constant", "value": "D:(A;;GA;;;WD)"}
+      ]
     },
     {
       "category": "pre_verification_write",
       "severity": "high",
+      "function": "wmain",
+      "detector": "analysis.integrity_check_order",
       "primitive_index": 2,
       "knowledge_refs": ["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
-      "cwe": ["CWE-471"]
-    },
-    {
-      "category": "missing_cleanup_on_failure",
-      "severity": "high",
-      "primitive_index": 3,
-      "knowledge_refs": ["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
-      "cwe": ["CWE-459"]
-    },
-    {
-      "category": "trusted_path_cache_load",
-      "severity": "critical",
-      "primitive_index": 4,
-      "knowledge_refs": ["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
-      "cwe": ["CWE-345"]
+      "cwe": ["CWE-471", "CWE-377"],
+      "mitre_attack": ["T1546"],
+      "description": "WriteFile precedes verify_payload; failure path returns without DeleteFileW",
+      "evidence_signatures": [
+        {"kind": "import", "name": "WriteFile"},
+        {"kind": "no_import", "name": "DeleteFileW"}
+      ]
     },
     {
       "category": "chain_pattern",
       "severity": "critical",
-      "detector": "analysis/chains.py",
-      "chain_name": "permissive-sddl-prewrite-cleanup-cache",
+      "function": "wmain",
+      "detector": "heuristics.chains",
+      "chain_name": "chains.eac_permissive_prewrite_cleanup_cache",
       "knowledge_refs": ["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
+      "cwe": ["CWE-732", "CWE-471"],
       "mitre_attack": ["T1574", "T1068"],
-      "description": "Composition of four primitives matches EAC arbitrary-write chain pattern"
+      "description": "permissive_sddl + pre_verification_write — EAC arbitrary-write chain shape (2/4 primitives present)"
     }
   ]
 }
