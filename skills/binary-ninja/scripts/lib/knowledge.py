@@ -223,42 +223,81 @@ def _title_to_slug(title: str) -> str:
     return _TITLE_NONALNUM_RE.sub("_", tail.lower()).strip("_")
 
 
+_STOPWORD_TOKENS = frozenset({
+    "the", "and", "for", "with", "via", "into", "from", "from",
+    "out", "via", "use", "uses", "using",
+})
+
+
+def _slug_tokens(slug: str) -> set[str]:
+    """Split a slug on underscores, drop tokens shorter than 3 chars
+    and common stopwords. Keeps the discriminating words for token-
+    overlap matching."""
+    if not slug:
+        return set()
+    return {
+        t for t in slug.split("_")
+        if t and len(t) >= 3 and t not in _STOPWORD_TOKENS
+    }
+
+
 def verify_finding_citations(
     category: str,
     description: str,
     cited_refs: list[str],
     threshold: float = 0.3,
+    min_token_overlap: int = 2,
+    require_all: bool = False,
     jm_path: Optional[str] = None,
 ) -> tuple[bool, list[KBEntry]]:
     """Substrate-coherence check.
 
-    Run `associate(category + description)` and confirm every entry in
-    `cited_refs` appears in the top results above `threshold`.
+    Run `associate(category + description)` and confirm `cited_refs`
+    are represented in the top results.
 
-    `jm associate` JSON output carries `title` but not `path`, so
-    matching is via title-slug overlap: each cited ref's slug
-    (`eac_eos_arbitrary_write_chain`) is checked against the
-    slugified titles of the top results. Substring containment in
-    either direction counts as a match — title slugs and ref slugs
-    diverge slightly (titles often have prefixes / suffixes the slug
-    omits) and either form satisfies the coherence claim.
+    `jm associate` JSON output carries `title` but not `path`, and
+    citation slugs (e.g. `eac_eos_arbitrary_write_chain`) commonly
+    use abbreviations that diverge from full titles
+    (`EasyAntiCheat EOS — standard-user → SYSTEM-directory ...`).
+    Pure substring matching misses these. We use a fuzzy
+    token-overlap check: cited slug tokens vs slugified-title
+    tokens, ≥ `min_token_overlap` discriminating tokens shared
+    counts as a match.
 
-    Returns (all_cited_ranked_well, top_results). If False, the
-    detector module's pattern table is mis-cited and should be revisited.
+    Default mode (`require_all=False`): coherent iff at least ONE
+    cited ref matches a top result. Detectors typically cite
+    multiple Knowledge entries (e.g. EAC + GameGuard) but only the
+    most query-specific will rank for any single finding's
+    description; requiring all to rank produces near-100% incoherent
+    verdicts.
+
+    Strict mode (`require_all=True`): coherent iff EVERY cited ref
+    matches. Use for promotion review where we want to verify the
+    full citation set.
+
+    Returns (coherent, top_results).
     """
     query = f"{category}: {description}"
     top = associate(query, threshold=threshold, jm_path=jm_path)
-    top_slugs = [_title_to_slug(e.title) for e in top]
-    all_present = True
+    top_token_sets = [_slug_tokens(_title_to_slug(e.title)) for e in top]
+    matches: list[bool] = []
     for ref in cited_refs:
         slug = _ref_slug(ref)
         if not slug:
             continue
+        cited_tokens = _slug_tokens(slug)
+        if not cited_tokens:
+            continue
         match = any(
-            slug in ts or ts in slug
-            for ts in top_slugs
+            len(cited_tokens & ts) >= min_token_overlap
+            for ts in top_token_sets
             if ts
         )
-        if not match:
-            all_present = False
-    return all_present, top
+        matches.append(match)
+    if not matches:
+        return (True, top)            # nothing to check → vacuously coherent
+    if require_all:
+        coherent = all(matches)
+    else:
+        coherent = any(matches)
+    return (coherent, top)
