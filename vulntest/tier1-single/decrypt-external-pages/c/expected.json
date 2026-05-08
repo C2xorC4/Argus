@@ -1,0 +1,35 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "decrypt-external-pages",
+    "language": "c",
+    "platform": "linux-kernel",
+    "difficulty": 10
+  },
+  "_notes": [
+    "Linux kernel module fixture. Build requires a kernel build environment (kernel-devel + kbuild) — skipped by build_all.sh on Windows. Real-module validation against esp4.ko / esp6.ko / rxrpc.ko from an AlmaLinux 8/9/10 vulnerable build is the canonical empirical target."
+  ],
+  "findings": [
+    {
+      "category": "decrypt_into_external_pages_candidate",
+      "severity": "medium",
+      "function": "<binary>",
+      "detector": "analysis.decrypt_external_pages",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/dirty_frag_decrypt_into_external_pages]]",
+        "[[Memory/Knowledge/argus_kernel_module_taint_via_arg_registers]]"
+      ],
+      "cwe": ["CWE-119", "CWE-787", "CWE-345"],
+      "mitre_attack": ["T1068"],
+      "description": "binary imports scatterlist-from-SKB constructor + crypto-decrypt sink without any privately-own gate (Dirty Frag class)",
+      "evidence_signatures": [
+        {"kind": "import_any", "names": ["skb_to_sgvec", "skb_to_sgvec_nomark", "sg_init_table", "sg_set_buf"]},
+        {"kind": "import_any", "names": ["crypto_aead_decrypt", "crypto_skcipher_decrypt", "aead_request_set_crypt"]},
+        {"kind": "no_import", "name": "skb_cow_data"},
+        {"kind": "no_import", "name": "skb_unclone"},
+        {"kind": "no_import", "name": "pskb_expand_head"}
+      ]
+    }
+  ]
+}

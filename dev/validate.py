@@ -27,9 +27,10 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from scripts.lib import BinjaSession, load_config                    # noqa: E402
 from scripts.analysis import (                                       # noqa: E402
-    cleanup_dominance, crypto, heap, integrity_check_order,
-    mitigations, obfuscation, race, sddl, source_surface, surface,
-    taint, trusted_path, types, uninit, windows_drivers,
+    cleanup_dominance, crypto, decrypt_external_pages, heap,
+    integrity_check_order, mitigations, obfuscation, race, sddl,
+    source_surface, surface, taint, trusted_path, types, uninit,
+    windows_drivers,
 )
 from scripts.heuristics import chains as heur_chains                 # noqa: E402
 from scripts.triage import auto_triage                               # noqa: E402
@@ -213,6 +214,15 @@ def validate_one(path: Path) -> dict:
         print(f"  tpath:   {result['tpath_time_s']}s")
         _summarise(tpath_findings, "trusted-path findings")
 
+        t14 = time.time()
+        dep_findings = decrypt_external_pages.analyze(
+            session, binary=str(path),
+            arch=result["arch"], platform=result["platform"])
+        result["dep_time_s"] = round(time.time() - t14, 2)
+        result["dep_findings"] = len(dep_findings)
+        print(f"  dirfrg:  {result['dep_time_s']}s")
+        _summarise(dep_findings, "dirty-frag findings")
+
         all_findings = (list(surf_findings) + list(src_findings)
                         + list(taint_findings)
                         + list(heap_findings) + list(crypto_findings)
@@ -220,7 +230,8 @@ def validate_one(path: Path) -> dict:
                         + list(uninit_findings) + list(types_findings)
                         + list(race_findings) + list(sddl_findings)
                         + list(ico_findings)
-                        + list(cleanup_findings) + list(tpath_findings))
+                        + list(cleanup_findings) + list(tpath_findings)
+                        + list(dep_findings))
 
         # Chain-pattern composition (Phase 1 final pass) — match the
         # heuristics/chains.py templates against the per-primitive
