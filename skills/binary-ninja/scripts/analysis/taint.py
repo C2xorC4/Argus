@@ -550,6 +550,18 @@ class TaintAnalyzer:
     _inlined_memcpy_addrs: set[int] = field(default_factory=set)
     _inlined_memcpy_names: set[str] = field(default_factory=set)
 
+    # Buffer-content taint (Tier 1.2, 2026-05-08): when a propagator
+    # like snprintf taints a destination SSA var that holds the
+    # address of a stack slot (`&var_N`), we record the stack slot
+    # as tainted. Subsequent SSA vars that resolve to the same
+    # `&var_N` (e.g., a fresh `mov rcx_1, &var_N` before a `system()`
+    # call that MSVC emits independently of the snprintf-side
+    # `&var_N` SSA var) inherit the taint at the stack-slot level.
+    # Closes the buffer-content vs SSA-variable taint gap that left
+    # `snprintf(buf,…,argv); system(buf)` undetected. Key shape:
+    # `(id(function), str(stack_var))`.
+    _tainted_stack_slots: set[tuple[int, str]] = field(default_factory=set)
+
     # ── Source enumeration ──────────────────────────────────────
 
     def _enumerate_source_calls(self) -> list[tuple[str, int, object]]:
@@ -568,12 +580,156 @@ class TaintAnalyzer:
 
     # ── Sink check ──────────────────────────────────────────────
 
+    def _to_ssa_form(self, function):
+        """Normalise `function` (Function | MLILFunction | SSA form)
+        to the SSA form. Returns None if no SSA form is available."""
+        if function is None:
+            return None
+        # Already SSA — has get_ssa_var_definition
+        if hasattr(function, "get_ssa_var_definition"):
+            return function
+        # MLIL function — has .ssa_form
+        ssa = getattr(function, "ssa_form", None)
+        if ssa is not None and hasattr(ssa, "get_ssa_var_definition"):
+            return ssa
+        # Function — has .mlil
+        mlil = getattr(function, "mlil", None)
+        if mlil is not None:
+            mssa = getattr(mlil, "ssa_form", None)
+            if mssa is not None and hasattr(mssa, "get_ssa_var_definition"):
+                return mssa
+            if hasattr(mlil, "get_ssa_var_definition"):
+                return mlil
+        return None
+
+    def _stack_slot_of(self, ssa_var, function) -> Optional[str]:
+        """If `ssa_var` is defined as `&local_var` (address-of a
+        stack slot), return the stack-slot variable's stringified
+        name. Else return None.
+
+        Used by the buffer-content taint mechanism to record stack
+        slots reached by propagators (so subsequent SSA vars
+        independently aliased to the same slot inherit taint).
+        """
+        if ssa_var is None:
+            return None
+        ssa_form = self._to_ssa_form(function)
+        if ssa_form is None:
+            return None
+        getdef = getattr(ssa_form, "get_ssa_var_definition", None)
+        if not callable(getdef):
+            return None
+        try:
+            defn = getdef(ssa_var)
+        except Exception:
+            return None
+        if defn is None:
+            return None
+        src = getattr(defn, "src", None)
+        if src is None:
+            return None
+        op_name = type(src).__name__
+        if "AddressOf" not in op_name and "Addr" not in op_name:
+            return None
+        slot = (getattr(src, "src", None)
+                or getattr(src, "var", None))
+        if slot is None:
+            return None
+        return str(slot)
+
+    def _arg_stack_slot(self, expr, function) -> Optional[str]:
+        """If a call-arg expression is itself `&local_var` (direct
+        AddressOf, no SSA-var indirection), return the slot name."""
+        if expr is None:
+            return None
+        op_name = type(expr).__name__
+        if "AddressOf" in op_name or "Addr" in op_name:
+            slot = (getattr(expr, "src", None)
+                    or getattr(expr, "var", None))
+            if slot is not None:
+                return str(slot)
+        # Or the arg might be an SSA var defined as &local
+        ssa = ilh.expr_to_ssa_var(expr)
+        if ssa is not None:
+            return self._stack_slot_of(ssa, function)
+        return None
+
+    def _record_tainted_stack_slot(self, ssa_var, function) -> None:
+        """If `ssa_var`'s definition is `&local_var`, record the
+        stack slot as tainted. Future arg-checks with the same slot
+        match as tainted regardless of SSA-var identity."""
+        slot = self._stack_slot_of(ssa_var, function)
+        if slot is None:
+            return
+        self._tainted_stack_slots.add((id(function), slot))
+
+    def _arg_aliases_tainted_stack(self, expr, function) -> bool:
+        """True iff the call-arg expression resolves to a tainted
+        stack slot. Used in `_check_sink` and `_maybe_propagate_through_call`
+        to bridge `&var_N` aliases that the SSA-var-equality check
+        misses."""
+        slot = self._arg_stack_slot(expr, function)
+        if slot is None:
+            return False
+        return (id(function), slot) in self._tainted_stack_slots
+
+    def _propagate_to_aliases_of_slot(self, slot_name: str, function,
+                                      depth: int, source_name: str,
+                                      source_addr: int,
+                                      visited: Optional[set] = None) -> None:
+        """When a stack slot becomes tainted, find every SSA var in
+        `function` defined as `&slot_name` and recurse propagation
+        from each. Closes the gap where MSVC re-emits `mov <reg>,
+        &var_N` separately for each call site — the propagator's
+        SSA-var-equality check would otherwise stop at the first
+        alias."""
+        if function is None or not slot_name:
+            return
+        ssa_form = self._to_ssa_form(function)
+        if ssa_form is None:
+            return
+        instructions = getattr(ssa_form, "instructions", None)
+        if instructions is None:
+            return
+        try:
+            for inst in instructions:
+                op_name = type(inst).__name__
+                # Only SetVarSsa-class definitions; skip stores etc.
+                if "Set" not in op_name or "Var" not in op_name:
+                    continue
+                src = getattr(inst, "src", None)
+                if src is None:
+                    continue
+                src_op = type(src).__name__
+                if "AddressOf" not in src_op and "Addr" not in src_op:
+                    continue
+                slot_var = (getattr(src, "src", None)
+                            or getattr(src, "var", None))
+                if slot_var is None or str(slot_var) != slot_name:
+                    continue
+                # Found a `<dst_ssa> = &<slot_name>` definition.
+                dst_ssa = getattr(inst, "dest", None)
+                if dst_ssa is None:
+                    continue
+                self._propagate(dst_ssa, function, depth,
+                                source_name, source_addr,
+                                visited=visited)
+        except Exception:
+            return
+
     def _check_sink(self, call_inst, tainted_var,
                     source_name: str, source_addr: int) -> Optional[Finding]:
         """If `call_inst` is a sink call with `tainted_var` at the
         sink's dangerous arg index, emit a Finding. Returns None
         otherwise (so the caller falls through to propagator / inter-
-        proc handling)."""
+        proc handling).
+
+        Buffer-content taint (2026-05-08): the arg-index match
+        accepts both (a) direct SSA-var equality with `tainted_var`,
+        and (b) the arg expression aliasing a previously-tainted
+        stack slot (`&var_N` where `var_N` was tainted by a
+        prior propagator emission).
+        """
         callee_addr = ilh.callee_address_of_call(call_inst)
         if callee_addr is None:
             return None
@@ -595,10 +751,17 @@ class TaintAnalyzer:
         # call is not a finding here — the propagator path will
         # carry the taint to the destination.
         params = ilh.call_params(call_inst)
+        # Resolve the function for stack-slot aliasing lookups.
+        sink_func = getattr(call_inst, "function", None)
         tainted_idx = None
         for i, p in enumerate(params):
             ssa = ilh.expr_to_ssa_var(p)
             if ssa is not None and str(ssa) == str(tainted_var):
+                tainted_idx = i
+                break
+            # Buffer-content alias: the arg references a stack slot
+            # that was previously tainted by a propagator.
+            if sink_func is not None and self._arg_aliases_tainted_stack(p, sink_func):
                 tainted_idx = i
                 break
         if tainted_idx != arg_index:
@@ -1056,12 +1219,28 @@ class TaintAnalyzer:
                 continue
             if dst_idx >= len(params):
                 continue
-            dst_ssa = ilh.expr_to_ssa_var(params[dst_idx])
-            if dst_ssa is None:
-                continue
-            self._propagate(dst_ssa, function, depth,
-                            source_name, source_addr,
-                            visited=visited)
+            dst_expr = params[dst_idx]
+            # Buffer-content taint: record the stack slot the dst
+            # references, so future calls with arg=&same_slot match
+            # as tainted even with a different SSA var.
+            dst_slot = self._arg_stack_slot(dst_expr, function)
+            if dst_slot is not None:
+                self._tainted_stack_slots.add((id(function), dst_slot))
+            dst_ssa = ilh.expr_to_ssa_var(dst_expr)
+            if dst_ssa is not None:
+                self._record_tainted_stack_slot(dst_ssa, function)
+                self._propagate(dst_ssa, function, depth,
+                                source_name, source_addr,
+                                visited=visited)
+            # Also explore all OTHER SSA vars that alias the same
+            # stack slot — MSVC commonly re-loads `&var_N` separately
+            # for each call site, producing distinct SSA vars; the
+            # tainted-stack-slot bookkeeping connects them.
+            if dst_slot is not None:
+                self._propagate_to_aliases_of_slot(
+                    dst_slot, function, depth,
+                    source_name, source_addr, visited=visited,
+                )
             any_propagated = True
         return any_propagated
 
