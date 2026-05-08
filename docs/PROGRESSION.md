@@ -24,9 +24,9 @@ specifically.
 
 | # | Phase | Item | Effort | Impact |
 |---|---|---|---|---|
-| 1.1 | 1 | Process-handle taint chain (`PsLookupProcessByProcessId` / `ObReferenceObjectByPointer`) — raises BYOVD process-killer coverage from 6/13 to ~12/13 | 1-2 days | High |
-| 1.2 | 1 | Buffer-content taint — Chesterton-fence check first (does `via_load_count >= 1` already cover snprintf-then-sink?), build only if needed | 0.5d check + 1-2d build | High |
-| 1.3 | 2-blackbox | `cleanup_dominance` v2 — verify-call-presence gate, suppresses notepad-class FP | 0.5 day | High (gate-2 closer) |
+| 1.1 | 1 | Process-handle taint chain (`PsLookupProcessByProcessId` / `ObReferenceObjectByPointer`) — raises BYOVD process-killer coverage from 6/13 to ~12/13 | 1-2 days | ⏸️ pending — High |
+| 1.2 | 1 | Buffer-content taint — Chesterton check **done 2026-05-08: does NOT already cover** (command-injection cell FAILs, taint analyzer doesn't connect `snprintf(buf, …, tainted)` to `system(buf)`). Build needed: tainted-stack-vars registry OR snprintf-class propagator. | 1-2d build (Chesterton done) | ⏸️ pending — High |
+| 1.3 | 2-blackbox | `cleanup_dominance` v2 — verify-call-presence gate, suppresses notepad-class FP | 0.5 day | ✅ done 2026-05-08 (FPs went 12 → 0 in clean-corpus sweep; Tier-2 EAC PASS preserved) |
 | 1.4 | 2-blackbox | `trusted_path` v2 — xref/taint from path-string to load callsite | 1 day | Medium-high |
 | 1.5 | 1 | E2 robustness — CcProtect + Viragt64 dispatch-write paths | 0.5-1 day | Medium |
 
