@@ -323,7 +323,7 @@ def run_targets(targets: list[str]) -> None:
             continue
         print(f"\n--- {tp} ---")
         try:
-            findings, times = run_pipeline(tp)
+            findings, times, _profile = run_pipeline(tp)
         except Exception as e:
             print(f"  [error] {type(e).__name__}: {e}")
             continue

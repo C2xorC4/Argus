@@ -174,13 +174,20 @@ Validation scoreboard:
 
 | Step | Effort | Status |
 |---|---|---|
-| 6.1 Knowledge entry `dirty_frag_decrypt_into_external_pages` | 1-2h | ⏳ this session |
-| 6.2 v1 co-presence detector + chain template | 2-3h | ⏳ this session |
-| 6.3 Tier-1 fixture cell + build + runner validation | 2-3h | ⏳ this session |
-| 6.4 v2 CFG-aware detector | 0.5-1d | next session |
-| 6.5 Module acquisition + empirical validation | 0.5d | next session |
-| 6.6 Refine v2 based on real-module run | 1d | follow-on |
+| 6.1 Knowledge entry `dirty_frag_decrypt_into_external_pages` | 1-2h | ✅ done 2026-05-08 |
+| 6.2 v1 co-presence detector + chain template | 2-3h | ✅ done 2026-05-08 |
+| 6.3 Tier-1 fixture cell (kernel module sources) | 2-3h | ✅ done 2026-05-08 (build deferred — needs Linux + kernel-devel) |
+| 6.4 v2 CFG-aware detector | 0.5-1d | ✅ done 2026-05-08 — `find_decrypt_external_pages_per_function` checks per-function constructor→sink dominance + privately-own-gate absence |
+| 6.5 Module acquisition + empirical validation | 0.5d | ✅ done 2026-05-08 — pulled `esp4.ko` / `esp6.ko` / `rxrpc.ko` from Ubuntu 24.04 / 6.8.0-111 lab VM. v2 fires on `esp_input`, `esp6_input`, `rxkad_verify_packet_1` (exact disclosure call sites) + 2 bonus rxkad sibling-class findings. Results in `vulntest/known-positive/dirty-frag/RESULTS.md`. |
+| 6.6 Refine v2 based on real-module run | 1d | Detector landed clean — no refinement needed for the canonical disclosure case. Future tightening: surface the bonus rxkad findings to operator triage with a confidence tier. |
 
-Sprint goal for this session: 6.1 + 6.2 + 6.3 — v1 detector firing on
-a synthetic Tier-1 fixture. v2 + module validation as the natural
-follow-on once the v1 architecture is in tree.
+**Validation summary:** v2 detector identifies the exact functions
+named in the dirtyfrag.io disclosure (`esp_input`, `esp6_input`,
+`rxkad_verify_packet_1`) plus 2 sibling-class candidates within
+`rxrpc.ko`. Same detection-quality pattern as the CVE-2026-31431
+result. Pre-patch posture confirmed; post-patch silence-test
+pending Ubuntu noble-updates rebase.
+
+Sprint goal for this session: 6.1–6.5. Empirically validated; v1
++ v2 detector in tree, fires on real-world CVE-2026-43284 +
+CVE-2026-43500 targets.
