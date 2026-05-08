@@ -1,0 +1,441 @@
+{
+  "summary": {
+    "targets_total": 15,
+    "targets_skipped": 0,
+    "targets_errored": 0,
+    "per_detector_total": {
+      "race": 6,
+      "surface": 13,
+      "heap": 16,
+      "obfuscation": 1,
+      "taint": 84,
+      "crypto": 2
+    },
+    "per_detector_targets": {
+      "race": [
+        "utilman.exe",
+        "notepad.exe",
+        "cmd.exe"
+      ],
+      "surface": [
+        "notepad.exe",
+        "calc.exe",
+        "xcopy.exe",
+        "where.exe",
+        "whoami.exe",
+        "reg.exe",
+        "tasklist.exe",
+        "cmd.exe"
+      ],
+      "heap": [
+        "notepad.exe",
+        "where.exe",
+        "whoami.exe",
+        "reg.exe",
+        "tasklist.exe",
+        "cmd.exe"
+      ],
+      "obfuscation": [
+        "notepad.exe"
+      ],
+      "taint": [
+        "where.exe",
+        "whoami.exe",
+        "hostname.exe",
+        "reg.exe",
+        "sc.exe",
+        "cmd.exe"
+      ],
+      "crypto": [
+        "cmd.exe"
+      ]
+    }
+  },
+  "results": [
+    {
+      "target": "C:\\Windows\\System32\\utilman.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 0,
+        "taint": 0,
+        "heap": 0,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 3,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "toctou": 3
+      },
+      "time_s": 14.02,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\sethc.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 0,
+        "taint": 0,
+        "heap": 0,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {},
+      "time_s": 3.48,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\osk.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 0,
+        "taint": 0,
+        "heap": 0,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {},
+      "time_s": 12.07,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\notepad.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 1,
+        "taint": 0,
+        "heap": 8,
+        "crypto": 0,
+        "obfuscation": 1,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 2,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "lcg_xor_cipher": 2,
+        "heap_buffer_overflow": 8,
+        "toctou": 2
+      },
+      "time_s": 22.97,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\calc.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 2,
+        "taint": 0,
+        "heap": 0,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "api_hash_resolution": 2
+      },
+      "time_s": 0.63,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\xcopy.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 1,
+        "taint": 0,
+        "heap": 0,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "ntdll_function_string": 1
+      },
+      "time_s": 1.89,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\where.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 1,
+        "taint": 14,
+        "heap": 1,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "peb_antidebug_check": 1,
+        "tainted_pointer_dereference": 13,
+        "integer_overflow_to_allocation": 1,
+        "unchecked_allocation": 1
+      },
+      "time_s": 2.42,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\whoami.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 1,
+        "taint": 7,
+        "heap": 1,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "peb_antidebug_check": 1,
+        "tainted_pointer_dereference": 7,
+        "unchecked_allocation": 1
+      },
+      "time_s": 2.99,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\hostname.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 0,
+        "taint": 2,
+        "heap": 0,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "tainted_pointer_dereference": 2
+      },
+      "time_s": 0.56,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\fc.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 0,
+        "taint": 0,
+        "heap": 0,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {},
+      "time_s": 1.04,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\find.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 0,
+        "taint": 0,
+        "heap": 0,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {},
+      "time_s": 0.7,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\reg.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 2,
+        "taint": 1,
+        "heap": 1,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "peb_antidebug_check": 2,
+        "tainted_pointer_dereference": 1,
+        "unchecked_allocation": 1
+      },
+      "time_s": 3.37,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\sc.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 0,
+        "taint": 56,
+        "heap": 0,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "tainted_pointer_dereference": 56
+      },
+      "time_s": 4.33,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\tasklist.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 2,
+        "taint": 0,
+        "heap": 1,
+        "crypto": 0,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 0,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "peb_antidebug_check": 2,
+        "unchecked_allocation": 1
+      },
+      "time_s": 5.53,
+      "arch": "x86_64"
+    },
+    {
+      "target": "C:\\Windows\\System32\\cmd.exe",
+      "skipped": false,
+      "error": null,
+      "counts": {
+        "surface": 3,
+        "taint": 4,
+        "heap": 4,
+        "crypto": 2,
+        "obfuscation": 0,
+        "windows_drivers": 0,
+        "uninit": 0,
+        "types": 0,
+        "race": 1,
+        "sddl": 0,
+        "integrity_check_order": 0,
+        "cleanup_dominance": 0,
+        "trusted_path": 0
+      },
+      "categories": {
+        "ntdll_function_string": 1,
+        "ssn_resolution_helpers": 1,
+        "non_csprng_use": 2,
+        "tainted_pointer_dereference": 3,
+        "integer_overflow_to_allocation": 1,
+        "heap_buffer_overflow": 1,
+        "unchecked_allocation": 3,
+        "csprng_absent": 1,
+        "toctou": 1
+      },
+      "time_s": 24.1,
+      "arch": "x86_64"
+    }
+  ]
+}

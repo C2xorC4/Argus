@@ -324,6 +324,39 @@ PROPAGATORS: dict[str, list[tuple[int, int]]] = {
     # Win32 path-build (returns dest path with tainted input)
     "PathCombineA":    [(2, 0), (1, 0)],
     "PathCombineW":    [(2, 0), (1, 0)],
+
+    # Tier 1.1 — Windows-kernel process-handle chain (BYOVD class).
+    # These APIs are also SINKS (kernel_arbitrary_process_handle),
+    # but they additionally produce an OUT param that inherits taint
+    # from the input PID/CLIENT_ID. Wiring them as propagators lets
+    # the chain flow continue: tainted PID → ZwOpenProcess →
+    # tainted handle → ZwTerminateProcess (a different sink).
+    # Without these, the OpenProcess sink emits but the chain stops,
+    # missing 7/13 BYOVD process-killer drivers that use
+    # PsLookupProcessByProcessId / ObReferenceObjectByPointer paths
+    # per Memory/Project/argus enhancement queue item 5.
+    #
+    # Signatures:
+    #   ZwOpenProcess(_Out_ PHANDLE, _In_ ACCESS_MASK,
+    #                 _In_ POBJECT_ATTRIBUTES, _In_opt_ PCLIENT_ID)
+    #     -> CLIENT_ID (arg 3) flows to handle-out (arg 0)
+    #   PsLookupProcessByProcessId(_In_ HANDLE PID, _Out_ PEPROCESS*)
+    #     -> PID (arg 0) flows to EPROCESS-out (arg 1)
+    "ZwOpenProcess":              [(3, 0)],
+    "NtOpenProcess":              [(3, 0)],
+    "PsLookupProcessByProcessId": [(0, 1)],
+    # ObReferenceObjectByPointer adds a ref to an existing object —
+    # its OUT semantic is on the in-place object, not a separate
+    # arg. Modelled as identity propagation so subsequent uses of
+    # the EPROCESS pointer remain tainted past the call. arg 0
+    # → arg 0 (no new SSA var; the use chain just continues).
+    "ObReferenceObjectByPointer": [(0, 0)],
+    # Token / handle utilities that create a derived tainted handle
+    # from a tainted input handle.
+    "ZwOpenProcessToken":         [(0, 2)],
+    "NtOpenProcessToken":         [(0, 2)],
+    "ZwOpenProcessTokenEx":       [(0, 3)],
+    "NtOpenProcessTokenEx":       [(0, 3)],
 }
 
 
@@ -923,7 +956,23 @@ class TaintAnalyzer:
                                             source_name, source_addr)
                 if finding is not None:
                     self.findings.append(finding)
-                    # Sink hit; do not propagate further from this call
+                    # Tier 1.1 (2026-05-08) — for sinks that ALSO act
+                    # as propagators (ZwOpenProcess produces a tainted
+                    # handle as OUT-arg from a tainted PID-IN-arg;
+                    # PsLookupProcessByProcessId produces a tainted
+                    # EPROCESS), don't short-circuit. Run the
+                    # propagator pass so the chain continues into the
+                    # downstream sink (TerminateProcess on the
+                    # tainted handle). For non-propagator sinks
+                    # (system, strcpy, etc.), the propagator returns
+                    # False and the loop falls through to `continue`.
+                    propagated_after_sink = self._maybe_propagate_through_call(
+                        use, ssa_var, function, depth,
+                        source_name, source_addr,
+                        visited=visited,
+                    )
+                    # Either way, don't fall through to inter-proc
+                    # hop or generic call-return transit on this use.
                     continue
 
                 # Check propagator: this call writes taint from a
