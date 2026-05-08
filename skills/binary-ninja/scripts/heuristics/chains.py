@@ -314,6 +314,53 @@ SCAN_RESISTANT_EGG_HUNT = ChainPattern(
 
 
 # ─────────────────────────────────────────────────────────────────
+# ret2shellcode — read into stack buffer → direct fn-ptr call
+# ─────────────────────────────────────────────────────────────────
+
+
+RET2SHELLCODE_CHAIN = ChainPattern(
+    name="chains.ret2shellcode_exec",
+    description=(
+        "Stack buffer read directly as executable shellcode — "
+        "read() fills stack buffer, program calls that buffer as function pointer; "
+        "NX must be disabled; attacker sends raw shellcode as input payload"
+    ),
+    severity=Severity.CRITICAL,
+    category="chain_pattern",
+    cwe=["CWE-94", "CWE-121"],
+    mitre_attack=["T1203"],
+    knowledge_refs=["[[Memory/Knowledge/linux_ret2shellcode_pattern]]"],
+    primitives=["ret2shellcode_exec"],
+    ordered=False,
+    min_primitives=1,
+)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Variable overwrite — oversized read() into adjacent guard variable
+# ─────────────────────────────────────────────────────────────────
+
+
+VARIABLE_OVERWRITE_CHAIN = ChainPattern(
+    name="chains.variable_overwrite",
+    description=(
+        "Oversized read() overflows into an adjacent stack variable that gates "
+        "a privileged call — attacker writes target_expected_value at "
+        "overwrite_offset to satisfy the guard condition and trigger the "
+        "privileged branch; no RIP control required"
+    ),
+    severity=Severity.HIGH,
+    category="chain_pattern",
+    cwe=["CWE-121"],
+    mitre_attack=["T1203"],
+    knowledge_refs=[],
+    primitives=["adjacent_variable_overwrite"],
+    ordered=False,
+    min_primitives=1,
+)
+
+
+# ─────────────────────────────────────────────────────────────────
 # Direct-syscall + TLS callback + hidden thread (malware evasion stack)
 # ─────────────────────────────────────────────────────────────────
 
@@ -356,6 +403,8 @@ PATTERNS: list[Pattern] = [
     EGG_HUNTING_SETUP,
     RET2WIN_ROP_CHAIN,
     SCAN_RESISTANT_EGG_HUNT,
+    RET2SHELLCODE_CHAIN,
+    VARIABLE_OVERWRITE_CHAIN,
 ]
 
 

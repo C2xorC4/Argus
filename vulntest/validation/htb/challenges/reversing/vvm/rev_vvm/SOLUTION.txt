@@ -1,0 +1,139 @@
+vvm — HTB Reversing Challenge — SOLUTION
+==========================================
+
+FLAG: HTB{v1rTu4L_p4sSw0rD_t3ChN0loGy}
+
+Verified:
+  $ echo 'HTB{v1rTu4L_p4sSw0rD_t3ChN0loGy}' | ./vvm
+  =======================
+  vvm v0.0.3
+  =======================
+  What is the password: Correct!
+
+
+ARCHITECTURE
+============
+The "VM" is actually a clever obfuscation pattern:
+- sub_401530 (setup): decrypts 24 small native x86_64 code blobs from
+  data_405020..data_40553f using a 6-byte XOR key cycle
+  [0x2a, 0x0b, 0x21, 0x21, 0x4d, 0x2a], mmaps each RWX, copies decrypted
+  bytes, and stores function pointers at offsets in struct data_4074e0.
+  Plus 4 native function pointers: sub_4012a0, sub_401320, sub_4013a0,
+  sub_4013e0.
+- sub_402870 (dispatcher): reads a 32-bit opcode index `i` from the
+  bytecode at data_405540, and calls funcs[i] with shared registers:
+  rdi = pc (bytecode base), rsi = &pc, rdx = stack base (data_406220),
+  rcx = sp pointer (data_406200), r8 = funcs table.
+- The handlers (the "blobs") implement a 28-opcode stack machine.
+- 0x1c is HALT.
+
+
+OPCODE TABLE (29 ops, 0x00..0x1c)
+==================================
+00 STRLEN     stack[top] = strlen(stack[top])              [blob10]
+01 SHL        a,b -> a<<b (32-bit)                          [blob14]
+02 MOD        signed                                        [blob21]
+03 GETLINE    read stdin line, push ptr (native)            [sub_401320]
+04 DIV        signed                                        [blob18]
+05 ADD                                                      [blob22]
+06 MUL        signed                                        [blob24]
+07 PTRACE     ptrace(0,0,0,0); exit(1) on debug             [sub_4013e0]
+08 OR         32-bit zero-extended                          [blob12]
+09 MOD3+17    (x+17) mod 3                                  [blob05]
+0a PRINTF     printf("%s", top); free; pop                  [sub_4013a0]
+0b JMP_DWORDS pc += imm dwords (no advance past imm)        [blob04]
+0c MUL6_M12   x = 6x - 12                                   [blob23]
+0d TRIM_NL    null-terminate at first '\n' in string        [blob09]
+0e POP        sp--                                          [blob08]
+0f PACK_BYTES build buffer of N low-bytes from top N stack  [sub_4012a0]
+10 PUSH_REL   push stack[sp-1-imm]                          [blob11]
+11 CALL       imm1=target(dwords), imm2=n_args              [blob06]
+12 LOADB_IDX  stack[top] = signed_byte(top_ptr[imm])        [blob02]
+13 EQ                                                       [blob17]
+14 NEQ                                                      [blob07]
+15 MUL8+24    x = 8x + 24                                   [blob01]
+16 JNZ        pop, if non-zero pc += imm dwords             [blob15]
+17 DUP                                                      [blob13]
+18 SUB                                                      [blob03]
+19 PUSH_IMM   push next dword (zero-extended)               [blob16]
+1a SHR        32-bit                                        [blob20]
+1b JMP_BACK   pc -= imm dwords                              [blob19]
+1c HALT       (terminates dispatch loop)
+
+
+CHECK ALGORITHM
+===============
+1. Print "What is the password: " (built via PUSH_IMM/arith + PACK_BYTES n=22).
+2. Read line from stdin (GETLINE).
+3. Trim trailing newline; compute strlen.
+4. Length check: ((strlen*6 - 12 + 4)/2 * 8 + 24)/10 == 76
+   => strlen must equal 32.
+5. Pack input into 8 uint32 chunks. Each chunk uses 4 bytes from input:
+       chunk[i] = input[idx0] | input[idx1]<<8 | input[idx2]<<16 | input[idx3]<<24
+   The index sets (in the order they appear on stack as b0..b3) are:
+       chunk_indices = [
+           [24, 14, 27, 15],  # c0
+           [11, 7, 12, 4],    # c1
+           [6, 9, 2, 18],     # c2
+           [19, 13, 20, 26],  # c3
+           [28, 16, 23, 8],   # c4
+           [3, 30, 21, 22],   # c5
+           [25, 5, 10, 31],   # c6
+           [29, 1, 0, 17],    # c7
+       ]
+6. ROL each chunk by a fixed amount (mapping c7..c0 -> r0..r7):
+       r0 = ROL(c7, 15)
+       r1 = ROL(c6, 19)
+       r2 = ROL(c5, 7)
+       r3 = ROL(c4, 18)
+       r4 = ROL(c3, 12)
+       r5 = ROL(c2, 20)
+       r6 = ROL(c1, 14)
+       r7 = ROL(c0, 7)
+7. Compare each r_i against a target constant; any mismatch -> "Incorrect".
+   Targets:
+       r0 == 0x2a239824
+       r1 == 0x8a73ea61
+       r2 == 0xba3cbd99
+       r3 == 0xddbdd50d
+       r4 == 0xf3444305
+       r5 == 0x47272423
+       r6 == 0x1517dd9c
+       r7 == 0xb639b429
+
+
+SOLVE
+=====
+Inverting:
+  c_i = ROR(target_{7-i}, shift_{7-i})
+Yields:
+  c0 = 0x536c7368 = 'hslS'  -> input[24]='h', [14]='s', [27]='l', [15]='S'
+  c1 = 0x7670545f = '_Tpv'  -> input[11]='_', [7]='T',  [12]='p', [4]='v'
+  c2 = 0x72423472 = 'r4Br'  -> input[6]='r',  [9]='4',  [2]='B',  [18]='r'
+  c3 = 0x305f3444 = 'D4_0'  -> input[19]='D', [13]='4', [20]='_', [26]='0'
+  c4 = 0x7543776f = 'owCu'  -> input[28]='o', [16]='w', [23]='C', [8]='u'
+  c5 = 0x3374797b = '{yt3'  -> input[3]='{',  [30]='y', [21]='t', [22]='3'
+  c6 = 0x7d4c314e = 'N1L}'  -> input[25]='N', [5]='1',  [10]='L', [31]='}'
+  c7 = 0x30485447 = 'GTH0'  -> input[29]='G', [1]='T',  [0]='H',  [17]='0'
+
+Reassembled: HTB{v1rTu4L_p4sSw0rD_t3ChN0loGy}
+
+
+CRITICAL SIM DETAIL
+===================
+PUSH_IMM uses `mov edi, [rax]` (32-bit, zero-extending) — constants are
+*unsigned 32-bit* on the stack, NOT sign-extended. This matters for the
+final SUB-then-JNZ comparison, where the targets like 0x8a73ea61 must
+match the 32-bit zero-extended ROL output rather than the signed Python
+representation -1972114847.
+
+
+ARTIFACTS
+=========
+extract_blobs.py             -- ELF blob decryptor
+disasm_blobs.py              -- per-blob capstone disassembly
+vm_sim.py                    -- full VM simulator
+decrypted_blobs.bin          -- enc/dec hex per blob
+decrypted_blobs_raw.bin      -- raw decrypted bytes
+decrypted_blobs_index.txt    -- blob -> dispatch offset map
+decrypted_blobs_manifest.txt -- per-blob enc/dec/ASCII summary

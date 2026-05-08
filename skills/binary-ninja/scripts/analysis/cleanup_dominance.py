@@ -37,6 +37,7 @@ from .integrity_check_order import (
     _COMMIT_IMPORTS,
     _ROLLBACK_BY_RESOURCE,
     _function_call_set,
+    _scan_verify_calls,
 )
 
 
@@ -79,6 +80,30 @@ def find_missing_cleanup(bv, *, binary: str, arch: str, platform: str,
             call_set = _function_call_set(bv, func)
             # Coarse signal: function commits but imports no rollback.
             if call_set & rollback_set:
+                continue
+
+            # v2 gate (2026-05-07): verify-call-presence + verify-not-
+            # dominating filter. Suppresses the documented v1 FP class
+            # — notepad / reg / sc / cmd write files without cleanup
+            # because their function contracts don't include cleanup,
+            # not because they're EAC-class bugs. Discriminator:
+            #   - verify call PRESENT in function: this is a verify-
+            #     and-commit codepath; relevant to the EAC class.
+            #   - verify call NOT dominating the commit: the verify is
+            #     after-commit (the EAC bug shape); if verify dominates
+            #     the commit (verify-first-then-write), the function
+            #     is structurally safe and the missing rollback is
+            #     irrelevant — suppress.
+            # This logic mirrors integrity_check_order's v4 emission
+            # gate (intentional convergence — both detectors emit on
+            # the EAC class, with different framings: order-bug vs
+            # cleanup-bug).
+            verify_present, verify_dominates = _scan_verify_calls(
+                bv, func, addr,
+            )
+            if not verify_present:
+                continue
+            if verify_dominates:
                 continue
             sf = getattr(func, "source_function", None) or func
             func_name = getattr(sf, "name", "") or ""
