@@ -85,7 +85,9 @@ consumes the LJM Knowledge corpus as detection substrate, defaults
 to "find all viable vulnerabilities," and gates external output to
 PROVEN findings only.
 
-Status: **Phase 0** — architecture + shared infrastructure.
+Status: **Phase 1 + 2 substantially complete; Phase 3 + 5 + 6 scaffolding shipped; Phase 4 minimal slice landed**.
+
+Forward-work prioritisation: [`docs/PROGRESSION.md`](docs/PROGRESSION.md).
 
 ## Architecture in one diagram
 
@@ -205,12 +207,12 @@ Methodology reference:
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Architecture + shared infrastructure | **Done** (2026-04-30) |
-| 1 | Identification stage rebase (heuristics + analysis modules + malware-analyzer + vuln-class-analyzer + manual-workflow docs) | **In progress** — 11 heuristics + surface/mitigations/taint/heap landed; Phase 1++ E1-E5 enhancements landed (Run 10: dbutil_2_3.sys 1→32 findings); Tier-2 foundational classes (Run 16): format-string, integer-OF, stack-OF, heap classes, uninit-mem, type-confusion (research), TOCTOU; Plans A/B/C v1 (Run 17): SDDL, write-then-verify CFG, low-entropy PRNG seed; legacy parity (Run 18): SOURCES 45 / SINKS 98, both supersets of legacy |
-| 2 | Source-guided / grey-box pipeline | **In progress** — minimal slice landed (Run 11): source parsing, source↔binary alignment, IOCTL constant decoding |
-| 3 | Exploitation stage | Planned |
-| 4 | Verification stage | **In progress** — minimal SSH-driven slice landed; first IMPACT_VERIFIED transitions on CVE-2026-31431 (Run 8) |
-| 5 | Differ + patcher rebases | Planned |
-| 6 | Synthesis + reporting | Planned |
+| 1 | Identification stage rebase (heuristics + analysis modules + malware-analyzer + vuln-class-analyzer + manual-workflow docs) | **Substantially complete** — 11 heuristics + 12+ analysis modules; Phase 1++ E1-E7 BYOVD detection (13/13 multi-driver sweep); Run-14 per-seed visited tracking; Tier-2 foundational classes; Plans A-D + integrity_check_order v4 (verify-call-presence) + cleanup_dominance v2 + trusted_path detectors |
+| 2 | Source-guided / grey-box pipeline | **Substantially complete** (closed 2026-05-07) — three Epic-submission coverage gaps closed: SDDL/ACE, write-then-verify v3 (verify-call-dominates-commit), PRNG provenance (Path A/B/C + IV-reuse + custom-cipher signatures); callee-signature alignment slice |
+| 3 | Exploitation stage | **Scaffolding shipped** (2026-05-07) — `exploit/` package: Primitive + PoC dataclasses, `compose_pocs(findings)` with state transitions + Evidence accumulation, x86/x86_64 RET + JOP gadget finder, multi-arch shellcode tables (x86 / x86_64 / aarch64 Linux execve_sh + x86 / x86_64 Windows winexec_calc), pwntools-style PoC renderer with ret2win + egg-hunt templates |
+| 4 | Verification stage | **In progress** — minimal SSH-driven slice landed; first IMPACT_VERIFIED transitions on CVE-2026-31431 (Run 8); HTB 5-challenge validation (Runs 21-26) — 12/12 PASS with working PoCs |
+| 5 | Triage + Differ + Patcher | **Triage functional** (2026-05-07) — `auto_triage(findings, min_confidence)` promotes DETECTED → CONFIRMED, wired between chain-match and PoC composition. Differ + Patcher scaffolding: dataclasses + skeleton API; full implementations deferred |
+| 6 | Synthesis + reporting | **Scaffolding shipped** (2026-05-07) — `output/vendor.py` HackerOne / MSRC / Bugcrowd / Epic Games renderers with PROVEN-only emission gate; SARIF + Markdown renderers from Phase 0 |
 
 ## Validation history
 
@@ -297,10 +299,19 @@ against the binary itself and remains effective.
 | Type-confusion candidate (research-grade) | `analysis/types.py` (binary-level RTTI absence) | Done (v1) |
 | TOCTOU / race | `analysis/race.py` (CFG-dominator) | Done |
 | Permissive SDDL + NULL DACL | `analysis/sddl.py` (Plan A) | Done |
-| Pre-verification write (CFG-path-sensitive) | `analysis/integrity_check_order.py` (Plan B v2) | Done |
+| Pre-verification write (verify-dominates-commit + verify-presence v4) | `analysis/integrity_check_order.py` v4 | Done — gate-2 CLEAN |
+| Missing cleanup on failure | `analysis/cleanup_dominance.py` v2 (verify-call-presence gate) | Done — gate-2 CLEAN (suppresses notepad-class FPs) |
+| Trusted-path cache load | `analysis/trusted_path.py` v1 (binary-scope path-string + load-API) | Done — gate-2 CLEAN |
 | Low-entropy PRNG seed | `analysis/crypto.py:find_low_entropy_seeds` (Plan C v1) | Done |
 | Synthetic PRNG sources from LCG constants | `analysis/crypto.py:_enumerate_synthetic_prng_call_sites` (Plan C v2) | Done |
 | CSPRNG-then-srand laundering | `analysis/crypto.py:find_csprng_laundered_to_prng` (Plan C v2) | Done |
+| Weak PRNG in security-named context (Path B/C) | `analysis/crypto.py` — function/caller name match + binary-scope indicator + MSVC-mangling-aware filter | Done |
+| IV reuse (constant or shared-buffer across cipher-init calls) | `analysis/crypto.py:find_iv_reuse` — consults `PossibleValueSet.value` for constant-pointer resolution | Done |
+| Custom cipher constants (Salsa/ChaCha sigma, RC4 table size) | `heuristics/crypto.py` — added Salsa/ChaCha sigma 0x61707865, RC4 256-byte marker | Done |
+| Decrypt-into-externally-owned-pages (Dirty Frag class) | `analysis/decrypt_external_pages.py` v1 (binary-scope import co-presence) | Done — v1 (CVE-2026-43284 / CVE-2026-43500 target) |
+| Buffer-content taint (snprintf→system, etc.) via stack-slot aliasing | `analysis/taint.py` — `_tainted_stack_slots` + `_propagate_to_aliases_of_slot` | Done (2026-05-08) |
+| Process-handle taint chain (BYOVD process-killer) | `analysis/taint.py` PROPAGATORS — ZwOpenProcess / PsLookupProcessByProcessId / ObReferenceObjectByPointer sink-as-propagator wiring | Done (2026-05-08) |
+| Linux exploit primitives (ret2win, egg-hunt, RWX-shellcode, alarm-timer, seccomp) | `analysis/linux_exploit.py` + `exploit/templates.py` (ret2win + egg-hunt PoC renderers) | Done |
 | UE5 source patterns | `analysis/source_surface.py:_scan_ue5_source_patterns` (Plan D v1) | Done |
 | BYOVD primitive class fingerprint | `heuristics/byovd_primitives.py` (E1-E7) | Done |
 | Windows kernel IRP dispatch wiring | `analysis/windows_drivers.py` (per-slot + bulk memfill) | Done |
@@ -313,6 +324,12 @@ against the binary itself and remains effective.
 | Phase 4 verification (SSH sanitizer + dmesg deltas) | `analysis/verify/sanitizer.py` | Done |
 | Known-vulnerable byte-pattern (0patch corpus, 2991 entries) | `heuristics/known_vulnerable_patterns.py` (exact SHA-1 + fuzzy version match) | Done |
 | Output (Finding v2 schema, SARIF 2.1.0, Markdown) | `output/` | Done |
+| Vendor-format renderers (HackerOne / MSRC / Bugcrowd / Epic Games) | `output/vendor.py` — PROVEN-only gate enforced | Done |
+| Phase 3 scaffolding (Primitive + PoC + ROP/JOP gadgets + multi-arch shellcode) | `scripts/exploit/` — primitives.py / chain.py / gadgets.py / shellcode.py / templates.py | Done — scaffolding |
+| Phase 5 Triage (auto-triage DETECTED → CONFIRMED) | `scripts/triage/__init__.py` — confidence-threshold default; reachability gates planned for v2 | Done — scaffolding |
+| Chain composition (heuristics/chains.py + ChainPattern.min_primitives) | `heuristics/chains.py:match` — round-trips PoC.to_chain_template_payload() back into ChainPattern | Done |
+| VulnTest harness (cell discovery, vuln/clean diff, hard-sig matcher, substrate-coherence check) | `vulntest/runner.py` + `vulntest/build_all.sh` (MSVC vcvars64) | Done |
+| Clean-corpus FP sweep harness | `dev/clean_corpus_sweep.py` — 15-binary Windows System32 baseline | Done |
 
 **Sources / sinks** (`heuristics/imports.py`): 45 sources, 98 sinks
 — both supersets of the pre-Argus legacy lists. Includes Win32
@@ -351,7 +368,9 @@ and IPC entries (`accept`, `msgrcv`, `mq_receive`, `shmat`).
 | **CVE-2026-31431** (`authencesn.ko`, "copy.fail") | IMPACT_VERIFIED | 6 critical `kernel_oob_write_at_offset` findings at exact disclosure call sites; sanitizer + dmesg deltas confirmed exploitability via Phase 4 SSH-driven verify. Generalised to sibling `algif_aead.ko`. |
 | **CVE-2021-21551** (`dbutil_2_3.sys`, Dell BYOVD) | CONFIRMED | 30 critical findings (29 `tainted_pointer_dereference` + 1 `kernel_arbitrary_rw_primitive`) at the IOCTL handler dispatch path. IRP dispatch table extracted automatically. Deterministic across runs. |
 | **BYOVD multi-driver sweep** (13 drivers) | DETECTED | 13/13 detected without per-target tuning. Includes RTCore64, dbutildrv2, asusio, ProcessHacker ring0, kdmapper-bundled drivers. |
-| **Tier-1 VulnTest corpus** (12 cells) | DETECTED | 11/12 TP. Only `double-free/c` (struct-field aliasing) remains FN — flagged as v3 work. |
+| **Tier-1 VulnTest corpus** (12 cells + 1 IV-reuse + 1 decrypt-external-pages) | DETECTED | 11/12 TP on the original 12; new cells (iv-reuse, decrypt-external-pages) extend coverage. Tier-2 chains (EAC + UE5) emit end-to-end with `ChainPattern.min_primitives`. Only `double-free/c` (struct-field aliasing) remains FN — flagged as v3 work. |
+| **HTB 5-challenge validation** (Runs 21-26) | DETECTED + PROVEN | 12/12 PASS with working PoCs across the binary-exploitation track. Independent third-party-graded solves visible at the public Argus HTB profile. |
+| **Dirty Frag** (CVE-2026-43284 esp4/esp6 + CVE-2026-43500 rxrpc) | v1 detector shipped (2026-05-08) | `analysis/decrypt_external_pages.py` v1 — binary-scope import co-presence (scatterlist constructor + crypto decrypt + no privately-own gate). v2 CFG-aware detector + empirical real-module validation (esp4.ko / rxrpc.ko from AlmaLinux pre-patch RPM) pending. Detection plan in `docs/DIRTY_FRAG_DETECTION_PLAN.md`. |
 
 **Microsoft accessibility binaries** (utilman / sethc / osk) — used
 as a control set:
