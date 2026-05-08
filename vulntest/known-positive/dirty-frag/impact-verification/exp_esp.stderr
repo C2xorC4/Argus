@@ -1,0 +1,3 @@
+[su] installed 48 xfrm SAs
+[su] wrote 192 bytes to /usr/bin/su starting at 0x0
+[su] /usr/bin/su page-cache patched (entry 0x78 = shellcode)

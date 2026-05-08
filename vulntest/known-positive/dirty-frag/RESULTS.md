@@ -78,34 +78,123 @@ v2 carries the result.
 
 ## State machine
 
-The 5 findings are in DETECTED state. Triage to CONFIRMED
-requires:
+| Function | Module | State | Transition reason |
+|---|---|---|---|
+| `esp_input` | `esp4.ko` | **IMPACT_VERIFIED** | Phase-4 harness 2026-05-08T14:10Z — dirtyfrag PoC `--force-esp` corrupted `/usr/bin/su` page cache; entry bytes `31 ff` at 0x78 confirmed; dmesg captured kernel-side shellcode execution |
+| `esp6_input` | `esp6.ko` | **IMPACT_PENDING** | Phase-4 PoC exercises IPv4-only (`xs->family = AF_INET`); IPv6 SA + ESPv6 trigger not yet executed — same code class, separate trigger needed |
+| `rxkad_verify_packet_1` | `rxrpc.ko` | **IMPACT_VERIFIED** | Phase-4 harness 2026-05-08T14:10Z — `--force-rxrpc` injected `root::0:0:` (empty password) into `/etc/passwd` page cache; `getent passwd root` confirmed via NSS; PoC stderr explicitly logged `PRIMITIVE proven` |
+| `rxkad_decrypt_ticket` | `rxrpc.ko` | DETECTED | sibling-class candidate; not exercised by public PoC, needs independent triage |
+| `rxkad_verify_response` | `rxrpc.ko` | DETECTED | sibling-class candidate; not exercised by public PoC, needs independent triage |
 
-1. **Reachability validation** — confirm `esp_input` and
-   `rxkad_verify_packet_1` are reachable from a userspace input
-   path that allows arbitrary SKB pages (splice/sendfile/MSG_SPLICE_PAGES).
-   The dirtyfrag.io disclosure already establishes this.
-2. **Mitigation review** — confirm no XFRM-policy mitigation or
-   PAM-config defense blocks the chain on this specific lab.
+State transitions captured at `triage/state.json`. Phase-4 harness, evidence, and stderr capture archived under `impact-verification/`.
 
-IMPACT_PENDING transition requires running the public dirtyfrag
-PoC against the VM and capturing page-cache corruption evidence.
-IMPACT_VERIFIED requires the launch chain (vmsplice → splice →
-IPsec receive → page-cache page modified) end-to-end. Phase 4
-work track.
+## Substrate-coherence
+
+`jm associate "decrypt into external pages SKB scatterlist
+dirty frag esp_input rxkad"` returns
+`dirty_frag_decrypt_into_external_pages` (knowledge) as the
+**top hit at 0.841**, well above the 0.3 retrieval threshold.
+The Knowledge entry referenced by the detector is properly
+indexed and surfaces on the canonical query — no orphan-anchor
+risk.
+
+## Post-patch silence test (attempted)
+
+Pulled `linux-modules-6.17.0-23-generic` (hwe-24.04) from
+`noble-updates`. The deb is dated `2026-04-30`, **before** the
+2026-05-07 disclosure — so it predates the patch landing in
+upstream `net.git`. Running v2 against the 6.17 modules:
+
+| Module | esp_input/esp6_input/rxkad_verify_packet_1 emission |
+|---|---|
+| `esp4.ko` (6.17.0-23) | still fires on `esp_input` (no dominating gate) |
+| `esp6.ko` (6.17.0-23) | still fires on `esp6_input` (no dominating gate) |
+| `rxrpc.ko` (6.17.0-23) | still fires on `rxkad_verify_packet_1` |
+
+Result: **silence test deferred — no patched Ubuntu build is
+yet shipped.** The 6.17 hwe deb is a different *kernel
+lineage* than 6.8.0-111, not a *patched* build. Re-fire once
+Ubuntu rebases `noble-updates` to a build that includes the
+upstream Dirty-Frag fix (target window: ~1-2 weeks post
+disclosure per typical Canonical SRU timelines).
+
+Patched-module retrieval automation is in
+`binary-postpatch/` so the silence rerun is a one-command
+re-fetch + replay once a fixed build is available.
+
+## Phase-4 Impact Verification (executed)
+
+Public PoC at `https://github.com/V4bel/dirtyfrag` cloned onto the
+lab VM; built with `gcc -O0 -Wall -o exp exp.c -lutil`; executed
+via `vulntest/known-positive/dirty-frag/impact-verification/verify_dirtyfrag.sh`.
+
+**ESP path (`./exp --force-esp`)**
+
+- Pre-state SHA-256 `/usr/bin/su` = `c74311fe...bdae78b`.
+- 48 xfrm SAs installed in a fresh user+net namespace; each SA's
+  `seq_hi` field carries 4 bytes of the rootshell ELF.
+- 48 `do_one_write` rounds: open `/usr/bin/su` RO → vmsplice ESP
+  header into pipe → splice 16 bytes from `/usr/bin/su` into
+  pipe → splice from pipe to ESP-in-UDP socket → kernel
+  `crypto_aead_decrypt` writes plaintext (= `seq_hi`) into the
+  pipe-mapped page-cache page of `/usr/bin/su`.
+- Post-exploit page cache: first 192 bytes match `shell_elf`
+  byte-for-byte. Entry `31 ff 31 f6 31 c0 b0 6a` at 0x78 — the
+  shellcode prologue (`xor edi,edi; xor esi,esi; xor eax,eax;
+  mov al,0x6a` → `setgid(0)`).
+- dmesg captured kernel-side execution: `process 'su' launched
+  '/bin/sh' with NULL argv: empty string added`.
+- Writeback flushed the corrupted page to disk during the 45 s
+  exploit window; on-disk SHA-256 changed to `0c0f135f...05ccd68a4`.
+- Restored via `sudo apt-get install --reinstall -y util-linux`;
+  post-restore SHA-256 matches the pre-state baseline.
+
+**RxRPC path (`./exp --force-rxrpc`)**
+
+- Pre-state SHA-256 `/etc/passwd` = `0ec9662a...335bc29c`.
+- PoC mmap's `/etc/passwd` PROT_READ|MAP_SHARED to align
+  page-cache offsets, brute-forces three fcrypt session keys
+  that decrypt to `::`, `0:`, `0:GGGGGG:` markers (3 stage
+  brute-force, the largest at ~21M iterations in 4.88 s on the
+  VM CPU).
+- Three `AF_RXRPC` client sendmsg triggers, one per byte slice;
+  each invokes `rxkad_verify_packet_1` →
+  `crypto_skcipher_decrypt` over the externally-owned page-
+  cache page of `/etc/passwd`.
+- Post-exploit page cache: line 1 reads
+  `root::0:0:.....:/root:/bin/bash` (binary garbage from cipher
+  residue between `:0:0:` and `:/root:`).
+- **Independent NSS verify**: `getent passwd root` returned
+  `root::0:0:�ʇ��:/root:/bin/bash`. PoC stderr line 49:
+  *"PRIMITIVE proven: root entry has empty passwd field via
+  NSS."*
+- `drop_caches` reverted on-disk file to baseline
+  (`0ec9662a...` matches pre-state).
+
+**Cleanup performed**
+
+- `echo 3 > /proc/sys/vm/drop_caches` (page-cache eviction).
+- ESP path: `apt reinstall util-linux` to restore `/usr/bin/su`
+  (writeback persisted the corruption to disk).
+- RxRPC path: drop_caches alone sufficient.
+- AppArmor unprivileged-userns restriction restored to its
+  pre-test value (1 = enabled).
+
+Evidence files: `impact-verification/result.json` (structured),
+`exp_esp.stderr`, `exp_rxrpc.stderr` (PoC narrative).
 
 ## Remaining work
 
-- **Post-patch confirmation** — rerun against the patched
-  kernel build once Ubuntu rebases noble-updates. Detector
-  should silence on the same functions.
-- **Triage to CONFIRMED** — exercise the disclosed PoC on the
-  lab VM under sanitizer instrumentation; transition state per
-  Phase 4 protocol.
-- **Substrate-coherence** — `jm associate "decrypt into external
-  pages SKB scatterlist"` should surface the
-  `dirty_frag_decrypt_into_external_pages` Knowledge entry as
-  top match.
+- **`esp6_input` IMPACT_VERIFIED** — write a v6-counterpart
+  trigger (XFRMA_ENCAP with AF_INET6, ESPv6 packet construction).
+  Same bug class — the PoC's IPv4 success establishes the
+  primitive; v6 just needs the v6 wire format.
+- **Post-patch silence rerun** — blocked on Ubuntu noble-
+  updates rebasing past 2026-05-07. Detector should silence on
+  the IMPACT_VERIFIED functions once a patched build lands.
+- **Sibling-class triage** — `rxkad_decrypt_ticket` and
+  `rxkad_verify_response` need independent reachability +
+  page-ownership review before promotion.
 
 ## Pipeline output
 

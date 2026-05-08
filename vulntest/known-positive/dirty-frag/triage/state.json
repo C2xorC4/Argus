@@ -1,0 +1,47 @@
+[
+  {
+    "binary": "vulntest/known-positive/dirty-frag/binary/esp4.ko",
+    "function": "esp_input",
+    "address": "0x4010d5",
+    "state": "impact_verified",
+    "transition_reason": "phase4_harness_2026-05-08T14:10Z: dirtyfrag PoC --force-esp wrote 192-byte shellcode to /usr/bin/su page cache at offset 0; entry bytes 31 ff at 0x78 confirmed; dmesg captured kernel-side shellcode execution (process su launched /bin/sh with NULL argv); writeback flushed corruption to disk; restored via apt reinstall util-linux",
+    "category": "decrypt_into_external_pages",
+    "severity": "high"
+  },
+  {
+    "binary": "vulntest/known-positive/dirty-frag/binary/esp6.ko",
+    "function": "esp6_input",
+    "address": "0x401265",
+    "state": "impact_pending",
+    "transition_reason": "phase4_harness_2026-05-08T14:10Z: dirtyfrag PoC IPv4-only (xs->family=AF_INET); esp6 code class is identical (esp6_input shares the in-place decrypt shape); IPv6 SA + ESPv6 packet trigger not exercised in this run",
+    "category": "decrypt_into_external_pages",
+    "severity": "high"
+  },
+  {
+    "binary": "vulntest/known-positive/dirty-frag/binary/rxrpc.ko",
+    "function": "rxkad_verify_packet_1",
+    "address": "0x4252f2",
+    "state": "impact_verified",
+    "transition_reason": "phase4_harness_2026-05-08T14:10Z: dirtyfrag PoC --force-rxrpc wrote root::0:0:...:/root:/bin/bash to /etc/passwd page cache; getent passwd root confirmed empty-password root entry via NSS; PoC stderr explicitly logged PRIMITIVE proven; on-disk file reverted by drop_caches",
+    "category": "decrypt_into_external_pages",
+    "severity": "high"
+  },
+  {
+    "binary": "vulntest/known-positive/dirty-frag/binary/rxrpc.ko",
+    "function": "rxkad_decrypt_ticket",
+    "address": "0x4268a6",
+    "state": "detected",
+    "transition_reason": null,
+    "category": "decrypt_into_external_pages",
+    "severity": "high"
+  },
+  {
+    "binary": "vulntest/known-positive/dirty-frag/binary/rxrpc.ko",
+    "function": "rxkad_verify_response",
+    "address": "0x426e03",
+    "state": "detected",
+    "transition_reason": null,
+    "category": "decrypt_into_external_pages",
+    "severity": "high"
+  }
+]
