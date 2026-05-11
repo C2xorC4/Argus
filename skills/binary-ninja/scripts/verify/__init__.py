@@ -28,6 +28,11 @@ from .sanitizer import (
     recommend_state,
     verify_remote,
 )
+from .local import (
+    DEFAULT_CRASH_PATTERNS,
+    verify_local,
+    verify_finding_locally,
+)
 from .triage import (
     apply_verification,
     load_findings,
@@ -39,6 +44,7 @@ from .triage import (
 
 __all__ = [
     "DEFAULT_DMESG_PATTERNS",
+    "DEFAULT_CRASH_PATTERNS",
     "Evidence",
     "FileDelta",
     "FileSnapshot",
@@ -50,5 +56,7 @@ __all__ = [
     "save_findings",
     "select_findings",
     "verify_remote",
+    "verify_local",
+    "verify_finding_locally",
     "write_run_log",
 ]
