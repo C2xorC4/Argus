@@ -107,8 +107,9 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from scripts.lib import BinjaSession, load_config                    # noqa: E402
 from scripts.analysis import (                                       # noqa: E402
     cleanup_dominance, crypto, decrypt_external_pages, dynamic_sink_arg,
-    heap, integrity_check_order, linux_exploit, obfuscation, race, sddl,
-    surface, taint, trusted_path, types, uninit, windows_drivers,
+    evasion_structures, heap, integrity_check_order, linux_exploit,
+    obfuscation, off_by_one, race, sddl, surface, taint, trusted_path,
+    types, uninit, windows_drivers,
 )
 from scripts.heuristics import chains as heur_chains                 # noqa: E402
 from scripts.heuristics._base import imports_in, strings_in          # noqa: E402
@@ -134,6 +135,8 @@ DETECTORS = [
     ("cleanup_dominance", cleanup_dominance),
     ("trusted_path", trusted_path),
     ("dynamic_sink_arg", dynamic_sink_arg),
+    ("evasion_structures", evasion_structures),
+    ("off_by_one", off_by_one),
     ("decrypt_external_pages", decrypt_external_pages),
     ("linux_exploit", linux_exploit),
 ]

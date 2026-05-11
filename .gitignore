@@ -128,6 +128,12 @@ output/
 # operator findings, and must be tracked.
 !skills/binary-ninja/scripts/output/
 !skills/binary-ninja/scripts/output/**
+# Re-ignore the bytecode cache inside the un-ignored output/ package.
+# The `!.../output/**` negation above otherwise un-ignores `__pycache__/`
+# under that path even though the top-of-file `__pycache__/` rule
+# would normally catch it.
+skills/binary-ninja/scripts/output/__pycache__/
+skills/binary-ninja/scripts/**/__pycache__/
 
 # ── Compiled VulnTest binaries (kept by tier subdirs that opt in) ──
 vulntest/**/build/

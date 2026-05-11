@@ -176,6 +176,139 @@ def _resolve_path_origin(function, ssa_var, *, max_hops: int = 4) -> Optional[st
     return _ssa_var_str(cur)
 
 
+def _is_stl_thunk_function(func) -> bool:
+    """True iff `func`'s demangled name belongs to the STL / library
+    (a function whose body is just `JMP <real_impl>` or a template
+    instantiation that delegates). MSVC + libstdc++ both emit these.
+
+    Uses the SYMBOL'S SHORT_NAME (demangled) — checking the raw
+    mangled `name` would treat every user C++ function (also
+    `_Z`-prefixed under Itanium) as STL.
+    """
+    sf = getattr(func, "source_function", None) or func
+    sym = getattr(sf, "symbol", None)
+    sn = (getattr(sym, "short_name", None) if sym else None) or getattr(sf, "name", "") or ""
+    return sn.startswith("std::") or sn.startswith("__cxxabi")
+
+
+def _walk_thunk_to_user_callsites(bv, func, *, max_depth: int = 2):
+    """If `func` is an STL thunk, return a list of (caller_func,
+    callsite_mlil_inst, ref_addr) for callers of `func`. Walks up
+    to `max_depth` levels, stopping when a non-STL caller is reached.
+    Used to bridge sink emissions that anchor inside library code
+    back to the user-code call site that triggered them.
+    """
+    out: list = []
+    if func is None:
+        return out
+
+    def _fn_start(fn):
+        # Accept either Function or MediumLevelILFunction; the latter
+        # has start via .source_function.
+        s = getattr(fn, "start", None)
+        if s is not None:
+            try:
+                return int(s)
+            except Exception:
+                pass
+        src = getattr(fn, "source_function", None)
+        return int(getattr(src, "start", 0) or 0) if src is not None else 0
+
+    seen: set = set()
+    frontier = [(func, max_depth)]
+    while frontier:
+        cur_fn, depth = frontier.pop()
+        if depth <= 0:
+            continue
+        start = _fn_start(cur_fn)
+        if start == 0:
+            continue
+        try:
+            refs = list(bv.get_code_refs(start) or [])
+        except Exception:
+            refs = []
+        for ref in refs:
+            caller = getattr(ref, "function", None)
+            if caller is None:
+                continue
+            fkey = int(getattr(caller, "start", 0) or 0)
+            if fkey in seen:
+                continue
+            seen.add(fkey)
+            # Resolve MLIL instruction at the call site.
+            ref_addr = int(getattr(ref, "address", 0) or 0)
+            mlil = None
+            try:
+                inst = caller.get_low_level_il_at(ref_addr)
+                if inst is not None and hasattr(inst, "mlil"):
+                    m = inst.mlil
+                    if m is not None:
+                        ssa = getattr(m, "ssa_form", None)
+                        mlil = ssa if ssa is not None else m
+            except Exception:
+                mlil = None
+            if mlil is not None:
+                # Non-STL caller → terminal; STL caller → keep walking
+                if _is_stl_thunk_function(caller):
+                    frontier.append((caller, depth - 1))
+                else:
+                    out.append((caller, mlil, ref_addr))
+            else:
+                # Couldn't resolve MLIL — still recurse if STL caller.
+                if _is_stl_thunk_function(caller):
+                    frontier.append((caller, depth - 1))
+    return out
+
+
+def _record_check_or_use_site(bv, mlil_inst, *, path_idx, sink_name,
+                              sink_label=None, results, kind):
+    """Helper: extract path_var + path_root + enclosing function and
+    append to the result list. When the enclosing function is an STL
+    thunk, also walks up to user-code callers and records synthesized
+    sites there (so race-pairing can match across thunk boundaries).
+    """
+    if mlil_inst is None:
+        return
+    params = ilh.call_params(mlil_inst)
+    if path_idx >= len(params):
+        return
+    path_var = ilh.expr_to_ssa_var(params[path_idx])
+    if path_var is None:
+        return
+    func = getattr(mlil_inst, "function", None)
+    fkey = ilh.function_key(func)
+    addr = int(getattr(mlil_inst, "address", 0) or 0)
+    root = _resolve_path_origin(func, path_var)
+    if root:
+        if kind == "check":
+            results.setdefault(fkey, []).append((addr, root, sink_name))
+        else:  # "use"
+            results.setdefault(fkey, []).append(
+                (addr, root, sink_name, sink_label, func))
+    # If the enclosing function is an STL thunk, walk callers and
+    # add synthesized sites at user-code call sites. The root path
+    # at the user-code site is derived from THAT call site's args.
+    if _is_stl_thunk_function(func):
+        for caller, caller_mlil, caller_addr in (
+                _walk_thunk_to_user_callsites(bv, func) or []):
+            caller_params = ilh.call_params(caller_mlil)
+            if path_idx >= len(caller_params):
+                continue
+            caller_pv = ilh.expr_to_ssa_var(caller_params[path_idx])
+            if caller_pv is None:
+                continue
+            caller_fkey = ilh.function_key(caller)
+            caller_root = _resolve_path_origin(caller, caller_pv)
+            if not caller_root:
+                continue
+            if kind == "check":
+                results.setdefault(caller_fkey, []).append(
+                    (caller_addr, caller_root, sink_name))
+            else:
+                results.setdefault(caller_fkey, []).append(
+                    (caller_addr, caller_root, sink_name, sink_label, caller))
+
+
 def find_toctou(bv, *, binary: str, arch: str, platform: str,
                 detector: str = "analysis.race") -> list[Finding]:
     findings: list[Finding] = []
@@ -191,43 +324,36 @@ def find_toctou(bv, *, binary: str, arch: str, platform: str,
         for addr, mlil in ilh.call_sites_of_import(bv, sink_name):
             if mlil is None:
                 continue
-            params = ilh.call_params(mlil)
-            if path_idx >= len(params):
-                continue
-            path_var = ilh.expr_to_ssa_var(params[path_idx])
-            if path_var is None:
-                continue
-            func = getattr(mlil, "function", None)
-            fkey = ilh.function_key(func)
-            root = _resolve_path_origin(func, path_var)
-            if not root:
-                continue
-            check_sites.setdefault(fkey, []).append((addr, root, sink_name))
+            _record_check_or_use_site(
+                bv, mlil, path_idx=path_idx, sink_name=sink_name,
+                results=check_sites, kind="check",
+            )
 
     if not check_sites:
         return findings
 
-    # Walk use sites; for each, look up matching check in same function
+    # Index use sites by function — same structure as check_sites but
+    # the entries also carry the use_label and resolved function.
+    # When the use-site call is inside an STL thunk, also walk callers
+    # to record synthesized use sites in user code.
+    use_sites: dict[int, list] = {}
     for sink_name, (path_idx, use_label) in _USE_SINKS.items():
         if sink_name not in imports:
             continue
         for addr, mlil in ilh.call_sites_of_import(bv, sink_name):
             if mlil is None:
                 continue
-            params = ilh.call_params(mlil)
-            if path_idx >= len(params):
-                continue
-            path_var = ilh.expr_to_ssa_var(params[path_idx])
-            if path_var is None:
-                continue
-            func = getattr(mlil, "function", None)
-            fkey = ilh.function_key(func)
-            checks_in_func = check_sites.get(fkey, [])
-            if not checks_in_func:
-                continue
-            root = _resolve_path_origin(func, path_var)
-            if not root:
-                continue
+            _record_check_or_use_site(
+                bv, mlil, path_idx=path_idx, sink_name=sink_name,
+                sink_label=use_label, results=use_sites, kind="use",
+            )
+
+    # Pair check and use sites in the same function.
+    for fkey, uses in use_sites.items():
+        checks_in_func = check_sites.get(fkey, [])
+        if not checks_in_func:
+            continue
+        for (addr, root, sink_name, use_label, func) in uses:
             # Match: same path-root + check dominates use in CFG.
             # v1 used linear program order (check_addr < use_addr).
             # v2 (Run 19) requires CFG dominance: the check's basic

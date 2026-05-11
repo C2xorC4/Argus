@@ -121,6 +121,15 @@ CATEGORY_META = {
             "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]",
         ],
     },
+    "type_confusion": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-843"],
+        "mitre": ["T1203"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/ec_undefined_behavior_taxonomy]]",
+            "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]",
+        ],
+    },
 }
 
 
@@ -339,6 +348,57 @@ def find_type_confusion_candidates(bv, *, binary: str, arch: str, platform: str,
     # signal anchoring. v2 (per-call-site SPECIFIC anchoring) will
     # wire `vtable_dispatch_after_unguarded_downcast` correctly.
     findings.append(finding)
+
+    # Per-call-site `type_confusion` HIGH emissions. In a binary
+    # that uses C++ classes and makes vtable-indirect calls but
+    # imports no RTTI helpers, EACH such site is a potential type-
+    # confusion sink — the operator can't tell if the pointer
+    # being dispatched has been downcast safely. v2 will refine by
+    # checking whether the dispatch target is reached via a
+    # function-parameter pointer (the classic "downcast a Shape*
+    # to a Circle* then call ->area()" shape).
+    type_meta = CATEGORY_META["type_confusion"]
+    seen_site_keys: set[tuple[str, int]] = set()
+    for site_addr, site_func in sites:
+        key = (site_func, site_addr)
+        if key in seen_site_keys:
+            continue
+        seen_site_keys.add(key)
+        findings.append(Finding(
+            id="",
+            category="type_confusion",
+            severity=type_meta["severity"],
+            address=int(site_addr),
+            function=site_func,
+            binary=binary, arch=arch, platform=platform,
+            detector=detector,
+            knowledge_refs=list(type_meta["knowledge_refs"]),
+            cwe=list(type_meta["cwe"]),
+            mitre_attack=list(type_meta["mitre"]),
+            description=(
+                f"{site_func}: vtable-indirect call at 0x{site_addr:x} "
+                f"in a binary that imports no RTTI helpers — the "
+                f"pointer being dispatched may have been downcast "
+                f"via unguarded `static_cast` from a different "
+                f"runtime type. Canonical type-confusion sink: "
+                f"calling a method through a virtual-dispatch slot "
+                f"that's actually the wrong type's vtable."
+            ),
+            evidence=[Evidence(
+                kind="vtable_dispatch_without_rtti",
+                source=detector,
+                payload=(f"site_addr=0x{site_addr:x} "
+                         f"rtti_imports=none "
+                         f"binary_indirect_calls={indirect_count}"),
+                address=int(site_addr),
+                function=site_func,
+            )],
+            details={
+                "site_addr": hex(int(site_addr)),
+                "rtti_imports_present": False,
+                "binary_indirect_call_count": indirect_count,
+            },
+        ))
     return findings
 
 
