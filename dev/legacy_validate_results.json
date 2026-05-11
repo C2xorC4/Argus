@@ -1,10 +1,10 @@
 {
-  "dbutil_2_3.sys": {
+  "utilman.exe": {
     "security_audit.py": {
       "script": "security_audit.py",
-      "elapsed": 1.83,
+      "elapsed": 10.04,
       "returncode": 0,
-      "findings": 0,
+      "findings": 3,
       "stderr_tail": [
         "[*] Scanning for sensitive strings...",
         "[*] Checking for integer overflows...",
@@ -14,11 +14,11 @@
     },
     "deep_analysis.py": {
       "script": "deep_analysis.py",
-      "elapsed": 1.83,
+      "elapsed": 17.15,
       "returncode": 0,
       "findings": 0,
       "stderr_tail": [
-        "[*] Analyzed 6 functions, found 0 taint flows.",
+        "[*] Analyzed 647 functions, found 108 taint flows.",
         "[*] Checking binary hardening...",
         "[*] Scanning for vulnerable patterns..."
       ],
@@ -26,7 +26,7 @@
     },
     "heap_analysis.py": {
       "script": "heap_analysis.py",
-      "elapsed": 1.81,
+      "elapsed": 16.59,
       "returncode": 0,
       "findings": 0,
       "stderr_tail": [
@@ -37,12 +37,12 @@
       "parse_error": null
     }
   },
-  "BdApiUtil64.sys": {
+  "sethc.exe": {
     "security_audit.py": {
       "script": "security_audit.py",
-      "elapsed": 2.33,
+      "elapsed": 7.35,
       "returncode": 0,
-      "findings": 0,
+      "findings": 1,
       "stderr_tail": [
         "[*] Scanning for sensitive strings...",
         "[*] Checking for integer overflows...",
@@ -52,11 +52,11 @@
     },
     "deep_analysis.py": {
       "script": "deep_analysis.py",
-      "elapsed": 2.43,
+      "elapsed": 7.84,
       "returncode": 0,
       "findings": 0,
       "stderr_tail": [
-        "[*] Analyzed 4 functions, found 0 taint flows.",
+        "[*] Analyzed 181 functions, found 0 taint flows.",
         "[*] Checking binary hardening...",
         "[*] Scanning for vulnerable patterns..."
       ],
@@ -64,23 +64,23 @@
     },
     "heap_analysis.py": {
       "script": "heap_analysis.py",
-      "elapsed": 2.39,
+      "elapsed": 10.06,
       "returncode": 0,
-      "findings": 0,
+      "findings": 1,
       "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
+        "Allocations analyzed: 10",
+        "Vulnerabilities found: 1",
+        "  DOUBLE_FREE: 1"
       ],
       "parse_error": null
     }
   },
-  "CcProtect.sys": {
+  "osk.exe": {
     "security_audit.py": {
       "script": "security_audit.py",
-      "elapsed": 12.48,
+      "elapsed": 11.89,
       "returncode": 0,
-      "findings": 14,
+      "findings": 35,
       "stderr_tail": [
         "[*] Scanning for sensitive strings...",
         "[*] Checking for integer overflows...",
@@ -90,11 +90,11 @@
     },
     "deep_analysis.py": {
       "script": "deep_analysis.py",
-      "elapsed": 22.76,
+      "elapsed": 19.0,
       "returncode": 0,
       "findings": 0,
       "stderr_tail": [
-        "[*] Analyzed 348 functions, found 0 taint flows.",
+        "[*] Analyzed 465 functions, found 0 taint flows.",
         "[*] Checking binary hardening...",
         "[*] Scanning for vulnerable patterns..."
       ],
@@ -102,393 +102,13 @@
     },
     "heap_analysis.py": {
       "script": "heap_analysis.py",
-      "elapsed": 19.98,
+      "elapsed": 17.74,
       "returncode": 0,
-      "findings": 0,
+      "findings": 3,
       "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "GameDriverX64.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 2.59,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 2.73,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 46 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 2.66,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "GoFly64.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 2.94,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 3.48,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 120 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 3.38,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "K7RKScan_2310.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 2.31,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 2.38,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 1 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 2.37,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "ksapi64.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 2.48,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 2.8,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 20 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 2.72,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "NSecKrnl.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 1.75,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 1.76,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 4 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 1.75,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "PoisonX.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 1.8,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 1.8,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 7 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 1.8,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "STProcessMonitor_v2618.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 2.21,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 2.29,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 25 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 2.26,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "SysMon.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 2.93,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 3.23,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 30 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 3.1,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "Viragt64.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 3.62,
-      "returncode": 0,
-      "findings": 15,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 3.96,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 10 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 3.99,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
-      ],
-      "parse_error": null
-    }
-  },
-  "wsftprm.sys": {
-    "security_audit.py": {
-      "script": "security_audit.py",
-      "elapsed": 2.12,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Scanning for sensitive strings...",
-        "[*] Checking for integer overflows...",
-        "[*] Checking format string usage..."
-      ],
-      "parse_error": null
-    },
-    "deep_analysis.py": {
-      "script": "deep_analysis.py",
-      "elapsed": 1.96,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "[*] Analyzed 32 functions, found 0 taint flows.",
-        "[*] Checking binary hardening...",
-        "[*] Scanning for vulnerable patterns..."
-      ],
-      "parse_error": null
-    },
-    "heap_analysis.py": {
-      "script": "heap_analysis.py",
-      "elapsed": 1.93,
-      "returncode": 0,
-      "findings": 0,
-      "stderr_tail": [
-        "=== Heap Analysis Summary ===",
-        "Allocations analyzed: 0",
-        "Vulnerabilities found: 0"
+        "Vulnerabilities found: 3",
+        "  DOUBLE_FREE: 1",
+        "  NULL_DEREF_AFTER_MALLOC: 2"
       ],
       "parse_error": null
     }

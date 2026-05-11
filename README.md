@@ -454,30 +454,50 @@ as a control set:
 
 ## Pre-Argus comparison
 
-Side-by-side numbers from the calibration runs (April 2026), with
-the FP/FN framing recontextualised against post-parity-audit
-ground truth:
+Fresh side-by-side numbers from the 2026-05-11 head-to-head run.
+Both pipelines were invoked against the identical 3-binary
+Microsoft accessibility control set (`utilman.exe`, `sethc.exe`,
+`osk.exe`) on the same host, same Binary Ninja install, same
+session. Harnesses: `dev/legacy_validate.py` (subprocess-driven
+against `~/.claude/skills/binary-ninja/scripts/`) and
+`dev/validate.py` (in-process Argus pipeline).
 
-| Axis | Legacy | Argus |
-|---|---|---|
-| Microsoft control set finding count | 43 | 0 / 4 candidate (mature detector lineup) |
-| Pipeline runtime, 3-binary control set | 200.4s | 14.9s (~13×) |
-| VulnTest emissions across 33 cells | 169 | 35 (~5× quieter) |
-| Per-finding Knowledge citation | None | 82% Knowledge-cited |
-| Per-finding confidence + exploitability axes | None | `confidence` + `mitigation_weighted_exploitability` |
-| Sources / sinks coverage | 35 sources, 34 sinks | 45 sources, 98 sinks (supersets) |
-| Native API / BYOVD primitive set | None | Full coverage |
+| Axis | Legacy | Argus | Delta |
+|---|---|---|---|
+| Control-set finding count (3 binaries) | 43 | 3 (candidate-grade TOCTOU in `utilman.exe`) | **~14× quieter** |
+| Per-binary finding breakdown | utilman 3 / sethc 2 / osk 38 | utilman 3 / sethc 0 / osk 0 | osk noise fully gated |
+| Wall-clock pipeline runtime (3 binaries, end-to-end) | 117.7s | 26.8s | **~4.4× faster** |
+| Per-finding Knowledge citation | None | 82% Knowledge-cited (cumulative across detector lineup) | new capability |
+| Per-finding confidence + exploitability axes | None | `confidence` + `mitigation_weighted_exploitability` (independent) | new capability |
+| Sources / sinks coverage | 35 sources, 34 sinks | 45 sources, 98 sinks | supersets |
+| Native API / BYOVD primitive set | None | Full coverage (E1–E7) | new capability |
+| Phase 3 — generic per-finding PoC generator | None | 12 category renderers | new capability |
+| Phase 4 — dynamic verification | None | SSH-driven (Linux kernel lab) + local-subprocess (cross-platform userspace) | new capability |
+| End-to-end Detect → PoC → IMPACT_VERIFIED in one pass | None | `vulntest --c-cpp-only` walks 100 IMPACT_VERIFIED transitions across the C/C++ corpus | new capability |
 
-The 43 legacy "FPs" were not all FPs — without per-finding ground
-truth in the legacy output format, the FP/FN ratios reported in
-the original calibration runs aren't load-bearing. Some of those
-legacy detections were proximate to genuinely surfaced patterns
-(the utilman.exe and sethc.exe candidates that Argus's mature
-pipeline now flags). The honest framing: Argus produces
-lower-volume, higher-precision, Knowledge-cited output; the
-legacy toolchain produced higher-volume, lower-precision,
-unsourced output. Both detected real things; only Argus
-distinguishes signal from noise reliably.
+The Argus detector lineup grew substantially between the original
+April calibration and this run (14 heuristics, 24 analysis modules;
++8 modules since the last comparison), so per-binary wall-clock
+time rose from the 14.9 s seen in April to 26.8 s today — the new
+modules pay for themselves in coverage. The legacy timing dropped
+from 200.4 s to 117.7 s on this host (different background load
+than the April calibration); the head-to-head ratio is the
+load-bearing number.
+
+The 3 remaining Argus findings on `utilman.exe` are the
+race-detector's TOCTOU triple in ATL `StartList::HandleFirstTime`
+(`GetFileAttributesW` → `DeleteFileW` over `CAtlList<CRegKey>`),
+flagged as candidate-grade pending source-level review. Argus
+emits zero findings on `sethc.exe` and `osk.exe`; the legacy
+toolchain emits 2 and 38 respectively on the same inputs.
+
+Caveat on FP framing: legacy emissions don't ship with per-finding
+provenance, so "FP rate" against legacy output isn't reproducible.
+Some of the 43 legacy emissions were proximate to genuinely
+surfaced patterns. The honest summary: same input, same host,
+~14× fewer emissions and ~4.4× faster runtime; Argus also tags
+each emission with its driving Knowledge entry and a confidence
+score, neither of which the legacy pipeline produces.
 
 ## Detector capabilities — to-do (v3+)
 
