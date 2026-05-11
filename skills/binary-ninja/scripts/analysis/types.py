@@ -467,20 +467,8 @@ def _function_takes_pointer_to_struct(fn, struct_name: str) -> bool:
     src_fn = getattr(fn, "source_function", None) or fn
     params = list(getattr(src_fn, "parameter_vars", None) or [])
     for p in params:
-        try:
-            ptype = getattr(p, "type", None)
-        except Exception:
-            # Binja can raise KeyError for unrecognised TypeClass
-            # values (e.g. ValueTypeClass on some PE32+ binaries) when
-            # materialising the Type from the parameter handle. Skip.
-            continue
-        if ptype is None:
-            continue
-        try:
-            type_str = str(ptype)
-        except Exception:
-            continue
-        if struct_name in type_str and "*" in type_str:
+        type_str = ilh.safe_type_str(p)
+        if type_str and struct_name in type_str and "*" in type_str:
             return True
     return False
 

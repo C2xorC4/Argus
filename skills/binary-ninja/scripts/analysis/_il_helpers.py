@@ -134,6 +134,40 @@ def call_sites_of_import(bv, name: str) -> list[tuple[int, object]]:
     return out
 
 
+def safe_var_type(var):
+    """Read `var.type` defensively.
+
+    Binja's `Variable.type` property invokes `Type.create(type_class, ...)`
+    under the hood, which raises `KeyError(<TypeClass.X: N>)` when the
+    type's class isn't in Binja's internal `Types` dispatch dict.
+    `ValueTypeClass: 10` has been observed on parameter_vars of certain
+    PE32+ binaries (utilman.exe, osk.exe). Other TypeClass values may
+    surface the same shape.
+
+    Returns the Type object, or None if it can't be materialised.
+    """
+    if var is None:
+        return None
+    try:
+        return getattr(var, "type", None)
+    except Exception:
+        return None
+
+
+def safe_type_str(var) -> str:
+    """Stringify `var.type` defensively. Returns '' if either the
+    type read or the stringification fails. Cheaper than two callers
+    each wrapping `safe_var_type` + `str()`.
+    """
+    t = safe_var_type(var)
+    if t is None:
+        return ""
+    try:
+        return str(t)
+    except Exception:
+        return ""
+
+
 def call_instructions_in(func) -> Iterable:
     """Yield MLIL Call-class instructions in `func`."""
     if func is None or getattr(func, "mlil", None) is None:

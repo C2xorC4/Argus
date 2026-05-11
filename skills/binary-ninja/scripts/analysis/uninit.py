@@ -147,7 +147,7 @@ def _resolve_stack_var_size(function, ssa_var) -> Optional[int]:
                 stype = getattr(op, "source_type", None)
                 stype_name = getattr(stype, "name", "") if stype is not None else ""
                 if "Stack" in stype_name or getattr(op, "is_stack_variable", False):
-                    var_type = getattr(op, "type", None)
+                    var_type = ilh.safe_var_type(op)
                     width = getattr(var_type, "width", None)
                     if width is None:
                         return None
@@ -239,7 +239,7 @@ def _aggregate_stack_footprint(function, starting_var) -> Optional[int]:
     except Exception:
         return None
     if not layout:
-        t = getattr(starting_var, "type", None)
+        t = ilh.safe_var_type(starting_var)
         return int(getattr(t, "width", 0)) if t is not None else None
     # Each entry is a Variable; for stack vars `.storage` is the
     # frame-relative offset (typically negative on x86_64).
@@ -250,10 +250,10 @@ def _aggregate_stack_footprint(function, starting_var) -> Optional[int]:
     # Sort by storage so contiguous neighbours line up.
     layout_sorted = sorted(
         ((int(getattr(v, "storage", 0)),
-          int(getattr(getattr(v, "type", None), "width", 0) or 0),
+          int(getattr(ilh.safe_var_type(v), "width", 0) or 0),
           v)
          for v in layout
-         if getattr(v, "type", None) is not None),
+         if ilh.safe_var_type(v) is not None),
         key=lambda t: t[0],
     )
     # Find the entry matching start_off (or the closest <= start_off).
