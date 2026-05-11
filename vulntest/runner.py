@@ -30,6 +30,38 @@ ARGUS_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ARGUS_ROOT / "skills" / "binary-ninja"
 
 
+def _resolve_cell_binary(cell_dir: Path, spec: dict) -> "Path | None":
+    """Resolve the vuln binary for a vulntest cell.
+
+    Lookup order:
+      1. `cell.binary_basename` field in expected.json — exact filename
+         under `cell/binary/`. Used by `known-positive/CVE-*` cells
+         whose binaries are real-world drivers / kernel modules with
+         CVE-canonical names.
+      2. `cell/build/vuln.exe` — the standard MSVC build output for
+         synthetic tier1/tier2 fixtures.
+      3. Any `*.sys`, `*.ko`, `*.elf`, or `*.exe` in `cell/binary/`
+         — fallback for cells that ship a pre-built binary without
+         declaring a basename.
+    """
+    cell_meta = (spec.get("cell") or {})
+    basename = cell_meta.get("binary_basename")
+    if basename:
+        candidate = cell_dir / "binary" / basename
+        if candidate.exists():
+            return candidate
+    standard = cell_dir / "build" / "vuln.exe"
+    if standard.exists():
+        return standard
+    binary_dir = cell_dir / "binary"
+    if binary_dir.is_dir():
+        for ext in (".sys", ".ko", ".elf", ".exe", ".so", ".dll"):
+            hits = sorted(binary_dir.glob(f"*{ext}"))
+            if hits:
+                return hits[0]
+    return None
+
+
 def _bare_identifier(name: str) -> str:
     """Strip C++ qualifiers / params / templates / mangling from a
     function name to recover the bare identifier.
@@ -452,14 +484,14 @@ def evaluate_cell(cell_path: Path, *, run_clean: bool = True,
     rel = cell_dir.relative_to(vulntest_root)
     print(f"\n=== {rel} ===")
 
-    vuln_bin = cell_dir / "build" / "vuln.exe"
+    vuln_bin = _resolve_cell_binary(cell_dir, spec)
     clean_bin = cell_dir / "remediation" / "build" / "vuln.exe"
 
     result = CellResult(cell_dir=cell_dir, expected=expected_findings,
                         vuln_findings=[], clean_findings=[])
 
-    if not vuln_bin.exists():
-        result.notes.append(f"ERROR: vuln binary missing: {vuln_bin}")
+    if vuln_bin is None or not vuln_bin.exists():
+        result.notes.append(f"ERROR: vuln binary missing under {cell_dir}")
         for exp in expected_findings:
             result.verdict[exp["category"]] = "FAIL-no-binary"
         return result
