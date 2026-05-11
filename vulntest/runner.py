@@ -109,6 +109,10 @@ def _function_name_matches(expected: str, got: str) -> bool:
     Match if any of:
       - Got is the sentinel `<binary>` (binary-scope finding — the
         detector doesn't carry a per-function anchor for this class).
+      - Expected uses an `<addr>` / `<*>` placeholder ("any anonymous
+        function" — used by tier3-obfuscated cells that expect
+        stripped-symbol output but where Binja may have recovered a
+        real name from .pdata / export table).
       - Expected is an exact / substring match of got (legacy behavior;
         handles `issue_token` matching `?issue_token@@...`).
       - The bare identifier of expected matches the bare identifier of got
@@ -120,6 +124,10 @@ def _function_name_matches(expected: str, got: str) -> bool:
     if not expected or not got:
         return False
     if got == "<binary>":
+        return True
+    # Tier-3 stripped-symbol placeholder: `sub_<addr>` / `<*>` / `*`
+    # all mean "accept any function".
+    if "<addr>" in expected or "<*>" in expected or expected.strip() in ("*", "<*>"):
         return True
     if expected in got:
         return True
