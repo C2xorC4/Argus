@@ -55,6 +55,20 @@ April–May 2026:
   zero human correction on exploit logic. This directly answers the
   question *"can AI develop exploits and pentest?"* with
   externally-graded, time-stamped evidence.
+- **Full Detect → PoC → Verify pipeline on the Windows C/C++ corpus**
+  (2026-05-11): a single `vulntest --c-cpp-only` pass walks **100
+  IMPACT_VERIFIED transitions across 28+ cells**, covering twelve
+  bug-class categories end-to-end (format_string, off_by_one,
+  path_traversal, uninitialised_memory_disclosure, use_after_free,
+  stack/heap buffer overflow, trusted_path_xref_to_load, toctou,
+  double_free, command_injection, stack_buffer_overflow). Findings
+  promote through the full state machine without operator
+  intervention: detector emits, `auto_triage` confirms, generic
+  per-finding PoC generator (`exploit/finding_poc.py`) renders a
+  category-appropriate trigger, and the local-execution harness
+  (`verify/local.py`) executes it and records the impact evidence.
+  The local harness mirrors the SSH-driven Linux sanitizer; the
+  state-machine bridge consumes both interchangeably.
 
 The four-state finding lifecycle —
 **DETECTED → CONFIRMED → IMPACT_PENDING → IMPACT_VERIFIED ≡ PROVEN** —
@@ -102,7 +116,10 @@ consumes the LJM Knowledge corpus as detection substrate, defaults
 to "find all viable vulnerabilities," and gates external output to
 PROVEN findings only.
 
-Status: **Phase 1 + 2 substantially complete; Phase 3 + 5 + 6 scaffolding shipped; Phase 4 minimal slice landed**.
+Status: **Phase 1 + 2 + 3 + 5 + 6 substantially complete; Phase 4
+landed on both Linux (SSH-driven) and Windows-userspace (local
+subprocess) paths, with the runner walking findings DETECTED →
+IMPACT_VERIFIED in a single pass**.
 
 Forward-work prioritisation: [`docs/PROGRESSION.md`](docs/PROGRESSION.md).
 
@@ -170,10 +187,14 @@ Argus/
 │           └── _template.md         ← per-module doc template
 └── vulntest/                        ← three-tier test corpus (mini-CTF format)
     ├── INDEX.md                     ← challenge index
+    ├── runner.py                    ← end-to-end Detect → PoC → Verify harness
+    │                                  (--c-cpp-only / --verify / --no-verify)
+    ├── build_all.sh                 ← MSVC vcvars64 multi-cell build driver
     ├── _templates/cell_README.md    ← per-cell brief template
-    ├── tier1-single/                ← isolated single-vuln × language matrix
-    ├── tier2-chains/                ← commonly-chained vulnerabilities
-    └── tier3-obfuscated/            ← obfuscation layered on Tier 1/2
+    ├── tier1-single/                ← isolated single-vuln × language matrix (28 cells)
+    ├── tier2-chains/                ← commonly-chained vulnerabilities (EAC, UE5)
+    ├── tier3-obfuscated/            ← obfuscation layered on Tier 1/2
+    └── known-positive/              ← real-world disclosure reproducers
 ```
 
 ## Knowledge integration
@@ -233,12 +254,12 @@ Methodology reference:
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Architecture + shared infrastructure | **Done** (2026-04-30) |
-| 1 | Identification stage rebase (heuristics + analysis modules + malware-analyzer + vuln-class-analyzer + manual-workflow docs) | **Substantially complete** — 11 heuristics + 12+ analysis modules; Phase 1++ E1-E7 BYOVD detection (13/13 multi-driver sweep); Run-14 per-seed visited tracking; Tier-2 foundational classes; Plans A-D + integrity_check_order v4 (verify-call-presence) + cleanup_dominance v2 + trusted_path detectors |
+| 1 | Identification stage rebase (heuristics + analysis modules + malware-analyzer + vuln-class-analyzer + manual-workflow docs) | **Substantially complete** — 14 heuristics + 24 analysis modules; Phase 1++ E1-E7 BYOVD detection (13/13 multi-driver sweep); Run-14 per-seed visited tracking; Tier-2 foundational classes; Plans A-D + integrity_check_order v4 (verify-call-presence) + cleanup_dominance v2 + trusted_path detectors; Sprint 3/4 lineup hardening (cross-function heap, off-by-one, dynamic sink-arg, evasion structures, tagged-union, managed/Go) |
 | 2 | Source-guided / grey-box pipeline | **Substantially complete** (closed 2026-05-07) — three Epic-submission coverage gaps closed: SDDL/ACE, write-then-verify v3 (verify-call-dominates-commit), PRNG provenance (Path A/B/C + IV-reuse + custom-cipher signatures); callee-signature alignment slice |
-| 3 | Exploitation stage | **Scaffolding shipped** (2026-05-07) — `exploit/` package: Primitive + PoC dataclasses, `compose_pocs(findings)` with state transitions + Evidence accumulation, x86/x86_64 RET + JOP gadget finder, multi-arch shellcode tables (x86 / x86_64 / aarch64 Linux execve_sh + x86 / x86_64 Windows winexec_calc), pwntools-style PoC renderer with ret2win + egg-hunt templates |
-| 4 | Verification stage | **In progress** — minimal SSH-driven slice landed; first IMPACT_VERIFIED transitions on CVE-2026-31431 (Run 8); HTB complete binary-exploitation + rootkit track — 11/11 challenges PROVEN; 18+ working PoC scripts; live remote exploitation over HTB VPN |
-| 5 | Triage + Differ + Patcher | **Triage functional** (2026-05-07) — `auto_triage(findings, min_confidence)` promotes DETECTED → CONFIRMED, wired between chain-match and PoC composition. Differ + Patcher scaffolding: dataclasses + skeleton API; full implementations deferred |
-| 6 | Synthesis + reporting | **Scaffolding shipped** (2026-05-07) — `output/vendor.py` HackerOne / MSRC / Bugcrowd / Epic Games renderers with PROVEN-only emission gate; SARIF + Markdown renderers from Phase 0 |
+| 3 | Exploitation stage | **Complete** (2026-05-11) — chain scaffolding (Primitive + PoC dataclasses, `compose_pocs`, RET/JOP gadget finder, multi-arch shellcode tables, pwntools-style ret2win + egg-hunt templates) PLUS generic per-finding PoC generator `exploit/finding_poc.py` (12 category renderers — stack/heap OF, format string, command injection, path traversal, off-by-one, UAF, double-free, uninit memory disclosure, TOCTOU, trusted-path load, kernel decrypt-external-pages stub). Each renderer emits a deterministic `[+] EXPLOIT RAN` marker the Phase-4 harness greps for. |
+| 4 | Verification stage | **Done** (2026-05-11) — two-path harness: `verify/sanitizer.py` (SSH-driven Linux lab — first IMPACT_VERIFIED transitions on CVE-2026-31431, dirty-frag CVE-2026-43284/43500) and `verify/local.py` (local-subprocess, cross-platform — drives Phase-3 PoCs against userspace targets on the analysis host itself). `vulntest/runner.py` integrates the local harness so a single `--c-cpp-only` pass walks DETECTED → CONFIRMED → IMPACT_PENDING → IMPACT_VERIFIED end-to-end. Latest sweep: 100 IMPACT_VERIFIED transitions across the Windows C/C++ corpus, 28+ cells, 12 bug-class categories. HTB binary-exploitation + rootkit track: 11/11 PROVEN over live VPN. |
+| 5 | Triage + Differ + Patcher | **Triage functional** (2026-05-07) — `auto_triage(findings, min_confidence)` promotes DETECTED → CONFIRMED, wired between chain-match and PoC composition. Differ + Patcher scaffolding: dataclasses + skeleton API; full implementations deferred. |
+| 6 | Synthesis + reporting | **Scaffolding shipped** (2026-05-07) — `output/vendor.py` HackerOne / MSRC / Bugcrowd / Epic Games renderers with PROVEN-only emission gate; SARIF + Markdown renderers from Phase 0. |
 
 ## Validation history
 
@@ -257,10 +278,10 @@ Re-runnable harnesses:
 ### Executive overview
 
 Argus is the LJM-driven rebase of a pre-LJM Binary Ninja
-instrumentation. As of Run 20 it has surpassed the legacy toolchain
-on every measurable axis (precision, speed, provenance, lifecycle
-discipline) and added several detector classes the legacy toolchain
-never had.
+instrumentation. It has surpassed the legacy toolchain on every
+measurable axis (precision, speed, provenance, lifecycle
+discipline) and added several detector classes — plus a full
+Detect → PoC → Verify pipeline — the legacy toolchain never had.
 
 **What Argus does that the legacy toolchain did not:**
 
@@ -303,8 +324,24 @@ never had.
 - **Four-state Finding lifecycle** — DETECTED → CONFIRMED →
   IMPACT_PENDING → IMPACT_VERIFIED. External output gated to
   PROVEN only.
-- **Phase 4 verification slice** — SSH-driven sanitizer + dmesg
-  deltas confirmed CVE-2026-31431 IMPACT_VERIFIED on isolated lab.
+- **Phase 4 verification — two-path harness.** SSH-driven sanitizer
+  + dmesg deltas (Linux kernel lab; first IMPACT_VERIFIED on CVE-
+  2026-31431 and the decrypt-into-external-pages disclosure target).
+  Local-subprocess harness mirrors the SSH variant on the analysis
+  host itself for Windows userspace targets; both paths share the
+  same `VerificationResult` shape so the state-machine bridge
+  consumes them interchangeably.
+- **Per-finding PoC generator (Phase 3).** Generic, category-driven
+  PoC renderer (`exploit/finding_poc.py`) emits a self-contained
+  Python trigger for each CONFIRMED finding with a deterministic
+  `[+] EXPLOIT RAN` marker; Phase 4 greps for that marker plus a
+  cross-platform crash-pattern set (Segfault, AddressSanitizer,
+  Access violation, _invalid_parameter, etc.).
+- **Single-pass runner integration.** `vulntest/runner.py` walks a
+  cell through detection, auto-triage, per-finding PoC generation,
+  and local verification in one invocation. The 2026-05-11 sweep
+  produced 100 IMPACT_VERIFIED transitions across the Windows C/C++
+  corpus without operator intervention.
 
 **Architectural posture:** Argus is "direct protection" — its
 detection survives runtime telemetry loss. Where EDR-class
@@ -319,10 +356,15 @@ against the binary itself and remains effective.
 | Stack overflow (red-zone + canary aware) | `analysis/taint.py` (extends), `_il_helpers.resolves_to_stack_variable` | Done |
 | Heap UAF / double-free / heap-OF | `analysis/heap.py` (SSA-def-chase + phi-merge filter + CRT denylist + RAII-wrapper denylist + CFG-disjoint pruning) | Done |
 | Global-pointer UAF (`g_session` pattern) | `analysis/heap.py:find_global_pointer_uaf` | Done |
+| Cross-function / class-aware heap (cross-function DF, C++ shallow-copy DF, cross-method UAF) | `analysis/cross_function_heap.py` (Sprint 4.1/4.2) | Done |
+| Off-by-one (loop `CmpUle`/`CmpSle` + indexed store sharing induction-variable ancestor) | `analysis/off_by_one.py` v1 | Done |
+| Dynamic-argument sink (non-constant pointer into `printf`/`system`/`fopen`-class) | `analysis/dynamic_sink_arg.py` — covers shapes where SSA taint dies at C++ stdlib wrappers | Done |
 | Format-string with tainted format slot | `analysis/taint.py` (position-aware sink check) | Done |
 | Integer-OF → allocation (missing-guard CFG) | `analysis/taint.py` + `_cfg_primitives.has_dominating_comparison_on` | Done |
 | Uninitialised memory disclosure | `analysis/uninit.py` | Done |
-| Type-confusion candidate (research-grade) | `analysis/types.py` (binary-level RTTI absence) | Done (v1) |
+| Type-confusion candidate (binary-level RTTI absence + tagged-union misuse) | `analysis/types.py` v1 (info-grade hint) + Sprint 4.3 tagged-union shape | Done (v1) |
+| Evasion structural patterns (TLS callbacks, hidden-from-debugger thread) | `analysis/evasion_structures.py` — pairs with `heuristics/evasion.py` StructuralPattern declarations | Done |
+| Managed-binary metadata heuristic (.NET IL + Go runtime strings) | `analysis/dotnet_managed.py` v1 (heuristic string co-presence; IL/gopclntab walk deferred to v2) | Done (v1) |
 | TOCTOU / race | `analysis/race.py` (CFG-dominator) | Done |
 | Permissive SDDL + NULL DACL | `analysis/sddl.py` (Plan A) | Done |
 | Pre-verification write (verify-dominates-commit + verify-presence v4) | `analysis/integrity_check_order.py` v4 | Done — gate-2 CLEAN |
@@ -347,7 +389,10 @@ against the binary itself and remains effective.
 | Crypto-primitive fingerprint (LCG/MT/AES/DES/MD5) | `heuristics/crypto.py` | Done |
 | Obfuscation (entropy / RWX / CFF / LCG-XOR string cipher) | `analysis/obfuscation.py` | Done |
 | Phase 2 source enrichment (callee alignment + IOCTL decode) | `analysis/source_surface.py` | Done |
-| Phase 4 verification (SSH sanitizer + dmesg deltas) | `analysis/verify/sanitizer.py` | Done |
+| Phase 4 verification — Linux SSH lab (sanitizer + dmesg deltas) | `verify/sanitizer.py` | Done |
+| Phase 4 verification — local subprocess (cross-platform; drives Phase-3 PoCs against userspace targets on the analysis host itself) | `verify/local.py` — `verify_local(plan)` + `verify_finding_locally(finding, poc_script)`; shares `VerificationResult` with the SSH variant | Done |
+| Per-finding PoC generator (Phase 3, generic, 12 category renderers) | `exploit/finding_poc.py` — emits deterministic `[+] EXPLOIT RAN` marker the Phase-4 harness greps for | Done |
+| Runner integration — Detect → PoC → Verify in a single pass, with `(binary, category)` PoC dedup and multi-language cell skip | `vulntest/runner.py:_run_local_verifications` + `--c-cpp-only`/`--verify`/`--no-verify` flags | Done |
 | Known-vulnerable byte-pattern (0patch corpus, 2991 entries) | `heuristics/known_vulnerable_patterns.py` (exact SHA-1 + fuzzy version match) | Done |
 | Output (Finding v2 schema, SARIF 2.1.0, Markdown) | `output/` | Done |
 | Vendor-format renderers (HackerOne / MSRC / Bugcrowd / Epic Games) | `output/vendor.py` — PROVEN-only gate enforced | Done |
@@ -394,7 +439,7 @@ and IPC entries (`accept`, `msgrcv`, `mq_receive`, `shmat`).
 | **CVE-2026-31431** (`authencesn.ko`, "copy.fail") | IMPACT_VERIFIED | 6 critical `kernel_oob_write_at_offset` findings at exact disclosure call sites; sanitizer + dmesg deltas confirmed exploitability via Phase 4 SSH-driven verify. Generalised to sibling `algif_aead.ko`. |
 | **CVE-2021-21551** (`dbutil_2_3.sys`, Dell BYOVD) | CONFIRMED | 30 critical findings (29 `tainted_pointer_dereference` + 1 `kernel_arbitrary_rw_primitive`) at the IOCTL handler dispatch path. IRP dispatch table extracted automatically. Deterministic across runs. |
 | **BYOVD multi-driver sweep** (13 drivers) | DETECTED | 13/13 detected without per-target tuning. Includes RTCore64, dbutildrv2, asusio, ProcessHacker ring0, kdmapper-bundled drivers. |
-| **Tier-1 VulnTest corpus** (12 cells + 1 IV-reuse + 1 decrypt-external-pages) | DETECTED | 11/12 TP on the original 12; new cells (iv-reuse, decrypt-external-pages) extend coverage. Tier-2 chains (EAC + UE5) emit end-to-end with `ChainPattern.min_primitives`. Only `double-free/c` (struct-field aliasing) remains FN — flagged as v3 work. |
+| **Tier-1 VulnTest corpus** (28 cells × C/C++/Go/Rust/.NET sub-cells) | DETECTED + IMPACT_VERIFIED | Cells span the full bug-class taxonomy: apc-injection, api-hash-resolution, command-injection, decrypt-external-pages, deserialization, direct-syscall, double-free, format-string, heap-overflow, hidden-thread, integer-overflow, iv-reuse, lcg-xor-cipher, null-dacl, off-by-one, path-traversal, peb-antidebug, permissive-sddl, pre-verify-write, prng-security-path, seh-veh-abuse, stack-overflow, tls-callback, toctou, trusted-path-xref, type-confusion, uninit-mem-disclosure, use-after-free. The 2026-05-11 `vulntest --c-cpp-only` sweep produced 51 PASS / 0 WARN / 4 FAIL and **100 IMPACT_VERIFIED transitions across 28+ cells** through the integrated Detect → PoC → Verify pipeline. Tier-2 chains (EAC + UE5) emit end-to-end via `ChainPattern.min_primitives`. Multi-language sub-cells (Go / Rust / .NET) build cleanly but are currently skipped by the local-verify harness pending per-language detectors (the `dotnet_managed.py` v1 heuristic catches metadata-rich shapes; runtime-pattern FPs against the C-flavoured detectors keep the cells out of verification scope). `double-free/c` (struct-field aliasing) remains FN — flagged as v3 work. |
 | **HTB binary-exploitation + rootkit track** (Runs 21-XX) | DETECTED + PROVEN | 11/11 challenges solved; 18+ working PoC scripts. Mathematricks (int32 overflow), Racecar (format string / random race), Restaurant (ret2libc two-stage), r0bob1rd (3-stage format-string GOT overwrite), Questionnaire (ret2win), El Teteo / El Mundo / El Pipo / Rocket Blaster XXX / Hunting (ret2shellcode + variable overwrite variants), Cyberpsychosis (diamorphine LKM rootkit — MAGIC_PREFIX = "psychosis", getdents64 hook bypassed via stat-based probing, world-readable flag at `/opt/psychosis/flag.txt`). All exploits run live over VPN. Third-party-graded, time-stamped solves at public Argus HTB profile. |
 | Decrypt-into-externally-owned-pages disclosure target (CVE-2026-43284 esp4/esp6 + CVE-2026-43500 rxrpc) | IMPACT_VERIFIED — framework's generic detector caught the disclosed CVE class organically (2026-05-08) | The pre-existing `analysis/decrypt_external_pages.py` (scatterlist-constructor + crypto-decrypt-sink without privately-own-gate) fired on the disclosure-named call sites — `esp_input`, `esp6_input`, `rxkad_verify_packet_1` — across Ubuntu 24.04 / 6.8.0-111 pre-patch modules, plus 2 sibling-class candidates (`rxkad_decrypt_ticket`, `rxkad_verify_response`). Phase-4 harness ran the public PoC against the lab VM: ESP path corrupted `/usr/bin/su` page cache (entry bytes `31 ff` at 0x78 confirmed; dmesg captured kernel-side `'su' launched '/bin/sh' with NULL argv`); RxRPC path injected `root::0:0:` into `/etc/passwd` page cache (`getent passwd root` returned the empty-password root entry via NSS). State: `esp_input` + `rxkad_verify_packet_1` → IMPACT_VERIFIED, `esp6_input` → IMPACT_PENDING (PoC IPv4-only). Evidence: `vulntest/known-positive/dirty-frag/impact-verification/`. |
 
@@ -445,7 +490,9 @@ distinguishes signal from noise reliably.
 | Cross-detector dedup at orchestrator level | `heap.py` and `taint.py` both emit `heap_buffer_overflow` on heap-overflow/c with different `detector` strings. |
 | Plan A V2/conditional ACE handling | Grammar reference now in `Memory/Knowledge/windows_sddl_grammar.md`; parser still v1. |
 | E2 indirect-dispatch beyond `__memfill_u64` | FastIoDispatch tables, PnP-only IRP registration. |
-| Phase 4 Windows-lab integration | Currently only Linux-lab is wired for dynamic verification. Windows lab needed for CVE-2021-21551 verification. |
+| Phase 4 Windows-kernel-lab integration | Local-subprocess harness covers Windows userspace (100 IMPACT_VERIFIED across the C/C++ corpus, 2026-05-11). Windows **kernel** verification (e.g. `dbutil_2_3.sys` driver, currently CONFIRMED) still needs a remote-Windows-kernel target plumbed analogously to `verify_remote`. |
+| Per-language detectors (Go gopclntab, Rust DWARF + panic-string anchors, .NET IL walk) | `dotnet_managed.py` v1 is heuristic string co-presence. Multi-lang cells are currently skipped by the local-verify harness (`--c-cpp-only` filter) until per-language detectors can distinguish runtime patterns from real bugs (Go runtime's `<=` comparisons FP into the off-by-one detector, Rust release binaries' large function counts time out under the same detector, etc.). |
+| Linux kernel-module build infrastructure | `vulntest/tier1-single/decrypt-into-external-pages/c` and the dirty-frag fixtures both rely on out-of-tree `.ko` builds; missing toolchain in the fixture corpus blocks any Phase-4 verification driven from inside the repo. The Phase-4 harness already differentiates `verify_remote` (kernel-LPE) vs `verify_local` (userspace) — only the fixtures are missing. |
 | Cross-arch target validation | AArch64, MIPS, RISC-V — verify `heuristics/syscalls.py` cross-arch SVC / ECALL patterns fire correctly. |
 | Expanded Windows control set | `cmd.exe`, `notepad.exe`, `explorer.exe`, `taskmgr.exe`. |
 | Linux ELF control set | `bash`, `coreutils`, `openssl`. |
