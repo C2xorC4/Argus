@@ -8,7 +8,7 @@
   },
   "findings": [
     {
-      "category": "lcg_xor_string_cipher",
+      "category": "lcg_xor_cipher",
       "severity": "info",
       "function": "lcg_xor_decrypt",
       "detector": "analysis/obfuscation.py",

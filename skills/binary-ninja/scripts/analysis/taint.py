@@ -72,6 +72,8 @@ _SINK_CLASS_SIGNALS: dict[str, tuple[str, ...]] = {
 # this set; they get HUB only unless len-arg analysis proves the
 # write size is uncontrolled.
 _UNBOUNDED_COPY_SINKS: frozenset[str] = frozenset({
+    # C++ stdlib — std::cin >> char[] family (no length argument)
+    "std::__istream_extract",
     "strcpy", "stpcpy", "strcat",
     "wcscpy", "wcscat",
     "lstrcpyA", "lstrcpyW", "lstrcatA", "lstrcatW",

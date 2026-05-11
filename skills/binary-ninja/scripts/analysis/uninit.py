@@ -80,6 +80,13 @@ _OUTPUT_SINKS: dict[str, tuple[int, Optional[int], str]] = {
     "copy_to_user":      (0, 2, "copy_to_user"),  # to, from, n  (note: from is 1)
     "__copy_to_user":    (0, 2, "__copy_to_user"),
     "_copy_to_user":     (0, 2, "_copy_to_user"),
+    # C++ stdlib — std::basic_ostream::write(const char*, streamsize).
+    # The Binja short_name for libstdc++/MSVC is "std::ostream::write"
+    # (also "std::wostream::write" for wide-char streams). Implicit
+    # `this` lives at arg 0; the buffer is arg 1, size arg 2.
+    "std::ostream::write":     (1, 2, "ostream::write"),
+    "std::wostream::write":    (1, 2, "wostream::write"),
+    "std::basic_ostream::write": (1, 2, "basic_ostream::write"),
 }
 
 
@@ -214,6 +221,149 @@ def _emit_size_from_sink(sink_name: str, params: list) -> Optional[int]:
     return None
 
 
+def _aggregate_stack_footprint(function, starting_var) -> Optional[int]:
+    """Sum the widths of contiguous stack variables starting at the
+    same storage offset as `starting_var`. Handles the MSVC -O0 case
+    where a struct is split into per-field stack locals: state (u16)
+    at offset -0x18, code (u32) at offset -0x14, message[16] at -0x10,
+    flags (u8) at 0x00, etc.
+
+    Returns the aggregate width in bytes, or None if no usable
+    layout is recoverable.
+    """
+    if function is None or starting_var is None:
+        return None
+    src_func = getattr(function, "source_function", None) or function
+    try:
+        layout = list(getattr(src_func, "stack_layout", []) or [])
+    except Exception:
+        return None
+    if not layout:
+        t = getattr(starting_var, "type", None)
+        return int(getattr(t, "width", 0)) if t is not None else None
+    # Each entry is a Variable; for stack vars `.storage` is the
+    # frame-relative offset (typically negative on x86_64).
+    try:
+        start_off = int(getattr(starting_var, "storage", 0))
+    except Exception:
+        return None
+    # Sort by storage so contiguous neighbours line up.
+    layout_sorted = sorted(
+        ((int(getattr(v, "storage", 0)),
+          int(getattr(getattr(v, "type", None), "width", 0) or 0),
+          v)
+         for v in layout
+         if getattr(v, "type", None) is not None),
+        key=lambda t: t[0],
+    )
+    # Find the entry matching start_off (or the closest <= start_off).
+    idx = None
+    for i, (off, _w, _v) in enumerate(layout_sorted):
+        if off == start_off:
+            idx = i
+            break
+    if idx is None:
+        return None
+    # Extend forward until we hit a frame-management boundary
+    # (saved_rbp, return_addr) or an argument-class variable. The
+    # extent of the buffer is the distance from `start_off` up to
+    # that boundary — covers the case where MSVC -O0 splits a
+    # struct into per-field stack locals with gaps for arrays /
+    # padding that the layout doesn't surface as separate Variables.
+    BOUNDARY_NAME_HINTS = ("saved_rbp", "saved_rsi", "saved_rdi",
+                           "__saved_", "__return_addr", "arg_")
+    end_off = None
+    for off, w, v in layout_sorted[idx + 1:]:
+        nm = getattr(v, "name", "") or ""
+        if any(hint in nm for hint in BOUNDARY_NAME_HINTS):
+            end_off = off
+            break
+    if end_off is None:
+        # No boundary found — fall back to the last layout entry's end.
+        if layout_sorted:
+            last_off, last_w, _ = layout_sorted[-1]
+            end_off = last_off + last_w
+    if end_off is None:
+        return None
+    total = end_off - start_off
+    return total if total > 0 else None
+
+
+def _find_stack_var_in_expr(expr, max_depth: int = 8):
+    """Walk an MLIL expression tree looking for an underlying stack
+    Variable (one with `.source_type` containing "Stack"). Returns
+    the Variable (with `.type.width` populated) or None.
+
+    Mirrors `_il_helpers._expr_contains_stack_var` but returns the
+    var instead of a bool, so callers can read the variable's size.
+    """
+    if expr is None or max_depth <= 0:
+        return None
+    # Bare Variable leaf
+    if hasattr(expr, "source_type") and not hasattr(expr, "operands"):
+        stype = getattr(expr, "source_type", None)
+        sname = getattr(stype, "name", "") if stype is not None else ""
+        if "Stack" in sname or getattr(expr, "is_stack_variable", False):
+            return expr
+    # SSA-var wrapper: expr.src is an SSAVariable; its .var is the Variable
+    src = getattr(expr, "src", None)
+    if src is not None and hasattr(src, "var"):
+        v = getattr(src, "var", None)
+        if v is not None:
+            stype = getattr(v, "source_type", None)
+            sname = getattr(stype, "name", "") if stype is not None else ""
+            if "Stack" in sname or getattr(v, "is_stack_variable", False):
+                return v
+    # Direct .var on the node
+    if hasattr(expr, "var"):
+        v = getattr(expr, "var", None)
+        if v is not None and hasattr(v, "source_type"):
+            stype = getattr(v, "source_type", None)
+            sname = getattr(stype, "name", "") if stype is not None else ""
+            if "Stack" in sname or getattr(v, "is_stack_variable", False):
+                return v
+        if v is not None and hasattr(v, "var"):
+            inner = getattr(v, "var", None)
+            if inner is not None:
+                stype = getattr(inner, "source_type", None)
+                sname = getattr(stype, "name", "") if stype is not None else ""
+                if "Stack" in sname or getattr(inner, "is_stack_variable", False):
+                    return inner
+    # Recurse
+    for op in (getattr(expr, "operands", None) or []):
+        r = _find_stack_var_in_expr(op, max_depth - 1)
+        if r is not None:
+            return r
+    return None
+
+
+def _resolved_stack_var(expr, function, max_hops: int = 3):
+    """SSA-def-chase variant: walk back from a register-class SSA var
+    until we hit a definition whose source contains a stack Variable.
+    Returns the underlying Variable or None.
+    """
+    if expr is None or function is None or max_hops <= 0:
+        return None
+    # Direct: the expression itself contains a stack var.
+    direct = _find_stack_var_in_expr(expr)
+    if direct is not None:
+        return direct
+    # SSA-def chase.
+    ssa = ilh.expr_to_ssa_var(expr)
+    if ssa is None:
+        return None
+    defn = ilh.ssa_def_of(function, ssa)
+    if defn is None:
+        return None
+    src = getattr(defn, "src", None)
+    if src is None:
+        return None
+    direct = _find_stack_var_in_expr(src)
+    if direct is not None:
+        return direct
+    return _resolved_stack_var(src, function, max_hops - 1)
+
+
 def find_uninit_disclosures(bv, *, binary: str, arch: str, platform: str,
                             detector: str = "analysis.uninit") -> list[Finding]:
     findings: list[Finding] = []
@@ -242,10 +392,27 @@ def find_uninit_disclosures(bv, *, binary: str, arch: str, platform: str,
                     continue
             except Exception:
                 continue
-            # Emit-size from the sink itself (constant-folded). Skip
-            # uninteresting small emissions — single int/pointer values
-            # aren't info-leak candidates.
+            # Emit-size from the sink itself (constant-folded). When
+            # the size operand isn't available at this MLIL site (most
+            # commonly when a thunk wrapper drops the size argument
+            # from the visible call — observed on MSVC-emitted
+            # `std::ostream::write` calls), fall back to the
+            # function's total stack-variable footprint at the
+            # buffer's stack offset. MSVC under -O0 splits structs
+            # into per-field stack variables, so the resolved Variable
+            # is typically the first field — its `.type.width` is too
+            # small. Use the larger of (resolved var width, sum of
+            # contiguous stack variables) to pick a sane emit size.
             emit_size = _emit_size_from_sink(sink_name, params)
+            if emit_size is None:
+                try:
+                    sv = _resolved_stack_var(params[buf_idx], func)
+                    if sv is not None:
+                        # Aggregate contiguous stack-variable footprint
+                        # starting at this offset.
+                        emit_size = _aggregate_stack_footprint(func, sv)
+                except Exception:
+                    pass
             if emit_size is None or emit_size < _MIN_BUFFER_SIZE:
                 continue
 

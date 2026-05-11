@@ -14,14 +14,57 @@ findings whose `confidence` ≥ `min_confidence` advance.
 ## Programmatic invocation
 
 ```python
-from scripts.triage import auto_triage
+from scripts.triage import auto_triage, phase4_triage, apply_phase4_evidence
 
-# Promote findings whose confidence meets the threshold
+# Phase-5: DETECTED → CONFIRMED via confidence threshold.
 promoted = auto_triage(findings, min_confidence=0.5)
+
+# Phase-4 bridge: CONFIRMED → IMPACT_PENDING / IMPACT_VERIFIED via
+# a declarative harness output. Walks each finding forward through
+# any required intermediate states, emitting one StateTransition
+# record per hop.
+summary = apply_phase4_evidence(
+    findings,
+    evidence_path='vulntest/known-positive/dirty-frag/impact-verification/phase4-transitions.json',
+)
+# summary['findings_walked'] = N, summary['errors'] = [...]
 ```
 
 Wired into `dev/validate.py` and `vulntest/runner.py` between the
-chain-match step and `compose_pocs`.
+chain-match step and `compose_pocs` (auto-triage). The
+`phase4_triage` bridge is consumed by Phase-4 verification harnesses
+(e.g. `verify_dirtyfrag.sh`) that emit a `phase4-transitions.json`
+declaration alongside the raw evidence files.
+
+### Phase-4 transition declaration schema
+
+```json
+{
+  "schema_version": "1.0",
+  "harness": "<harness-name>",
+  "timestamp_utc": "<ISO 8601 UTC>",
+  "transitions": [
+    {
+      "match": {
+        "function": "<name>",          // exact match
+        "category": "<category>",      // exact match
+        "binary": "<substring>",       // substring match
+        "detector": "<dotted-name>",   // exact match
+        "address": "0x...",            // hex string or int
+        "id": "<finding-id>"           // exact match
+      },
+      "target_state": "impact_verified",  // detected | confirmed | impact_pending | impact_verified | dismissed
+      "reason": "free-text rationale",
+      "evidence_ref": "<file>:<line>"     // optional pointer
+    }
+  ]
+}
+```
+
+Any subset of `match` fields can be specified; multiple findings
+matching the same criteria are all walked. Target state walks the
+canonical forward path (DETECTED → CONFIRMED → IMPACT_PENDING →
+IMPACT_VERIFIED) so the audit trail captures every intermediate hop.
 
 ## Manual workflow
 

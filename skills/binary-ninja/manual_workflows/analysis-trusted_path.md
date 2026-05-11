@@ -11,16 +11,37 @@ low-trust location and treats it as authoritative — the canonical
 EAC chain's terminal primitive (cache-load of attacker-poisoned
 data).
 
-Emits `trusted_path_cache_load`.
+Emits two categories:
+- `trusted_path_cache_load` (MEDIUM, v1) — binary-scope co-presence
+- `trusted_path_xref_to_load` (HIGH, v2) — per-callsite proven flow
+  from an attacker-writable path literal to a specific load API
+  call site
+
+When v2 fires for a binary, v1 is suppressed (v2 is strictly more
+informative — knowing *which* literal flows to *which* load
+callsite supersedes "some such literal exists somewhere").
 
 ## Detector character
 
-- **v1 (current, binary-scope heuristic):** the path-string and
-  load-import are co-present anywhere in the binary; the detector
-  doesn't xref the string to a specific load call site. High-recall
-  per-binary, low-precision per-call-site.
-- **v2 (planned):** xref the matched path string to the call site
-  that loads it. Per-call-site emission.
+- **v1 binary-scope heuristic:** the path-string and load-import
+  are co-present anywhere in the binary; the detector doesn't
+  xref the string to a specific load call site. High-recall
+  per-binary, low-precision per-call-site. Useful fallback for
+  cases where v2's SSA back-walk doesn't resolve (computed paths,
+  obfuscated string assembly).
+- **v2 per-callsite SSA xref:** for every load-class call site
+  (`LoadLibraryW`, `fopen`, `CreateFileW`, etc.), walks the SSA
+  definition chain back from the path argument up to four hops
+  to a constant pointer. If that pointer resolves to a string
+  in the binary's string table containing an attacker-writable
+  token, emits HIGH. Currently handles direct ConstPtr,
+  Load-of-ConstPtr, single/multi-hop SSA copies, and
+  Phi-node-bounded chains. Does NOT currently handle:
+  - Buffer-built paths (`swprintf(buf, ...); LoadLibraryW(buf)`) —
+    Tier 1.2 stack-slot taint can extend this in a follow-on
+  - Registry-derived paths (`RegQueryValueW` → `LoadLibraryW`)
+  - Environment-variable-resolved paths (`GetEnvironmentVariableW`
+    → expansion → load)
 
 ## Programmatic invocation
 

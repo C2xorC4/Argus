@@ -54,7 +54,11 @@ EAC_PERMISSIVE_PREWRITE_CACHE = ChainPattern(
         # Both are minimal-v1 forms; tightening from coarse-recall to
         # precision-aware versions is future work.
         "missing_cleanup_on_failure",
-        "trusted_path_cache_load",
+        # Either v1 (binary-scope) or v2 (xref-resolved) trusted-path
+        # primitive satisfies this slot. v2 is the precision-grade
+        # signal; v1 is the high-recall fallback. The chain shape
+        # cares about presence, not which detector layer fired.
+        ("trusted_path_cache_load", "trusted_path_xref_to_load"),
     ],
     ordered=True,
     same_function=False,
@@ -425,17 +429,37 @@ def match(bv, *, binary: str, arch: str, platform: str,
         return []
     seen_categories = {f.category for f in existing_findings}
     out = []
+
+    def _slot_categories(slot):
+        """A slot is either a str or a tuple/list of strs (any-of)."""
+        if isinstance(slot, (tuple, list, set, frozenset)):
+            return tuple(slot)
+        return (slot,)
+
+    def _slot_present(slot) -> bool:
+        return any(c in seen_categories for c in _slot_categories(slot))
+
+    def _slot_label(slot) -> str:
+        cats = _slot_categories(slot)
+        return cats[0] if len(cats) == 1 else "(" + "|".join(cats) + ")"
+
+    def _slot_match_categories(slot) -> set:
+        return {c for c in _slot_categories(slot) if c in seen_categories}
+
     for chain in PATTERNS:
         if not isinstance(chain, ChainPattern):
             continue
-        matched_prims = [p for p in chain.primitives if p in seen_categories]
+        matched_prims = [s for s in chain.primitives if _slot_present(s)]
         required = (chain.min_primitives if chain.min_primitives is not None
                     else len(chain.primitives))
         if len(matched_prims) < required:
             continue
-        # Anchor the chain finding at the first matching primitive
+        # Flatten all categories from all slots for anchor / detail lookup.
+        all_chain_cats: set[str] = set()
+        for s in chain.primitives:
+            all_chain_cats.update(_slot_categories(s))
         anchor = next(
-            (f for f in existing_findings if f.category in chain.primitives),
+            (f for f in existing_findings if f.category in all_chain_cats),
             None,
         )
         if anchor is None:
@@ -449,11 +473,14 @@ def match(bv, *, binary: str, arch: str, platform: str,
             arch=anchor.arch or arch,
             platform=anchor.platform or platform,
             detector=detector,
-            description_extra=f"primitives present: {', '.join(chain.primitives)}",
+            description_extra=(
+                "primitives present: "
+                + ", ".join(_slot_label(s) for s in chain.primitives)
+            ),
             details={
                 "chain_name": chain.name,
                 "primitive_findings": [
-                    f.id for f in existing_findings if f.category in chain.primitives
+                    f.id for f in existing_findings if f.category in all_chain_cats
                 ],
             },
         ))

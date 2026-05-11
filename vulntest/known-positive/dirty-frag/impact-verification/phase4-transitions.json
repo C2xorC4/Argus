@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "harness": "verify_dirtyfrag.sh",
+  "timestamp_utc": "2026-05-08T14:10:16Z",
+  "_notes": [
+    "Declarative replay of the Phase-4 verification outcome captured at vulntest/known-positive/dirty-frag/impact-verification/result.json.",
+    "Consumed by scripts.triage.phase4_triage / apply_phase4_evidence to walk findings forward through the state machine.",
+    "Re-running the harness after a kernel update / detector refresh will overwrite this file and the next run of the triage bridge will reflect the new outcome."
+  ],
+  "transitions": [
+    {
+      "match": {
+        "function": "esp_input",
+        "category": "decrypt_into_external_pages"
+      },
+      "target_state": "impact_verified",
+      "reason": "phase4 harness wrote 192-byte shellcode to /usr/bin/su page cache via xfrm-ESP in-place decrypt; entry bytes 31 ff at offset 0x78 confirmed; dmesg captured kernel-side exec ('process su launched /bin/sh with NULL argv'); writeback flushed corruption to disk; restored via apt reinstall util-linux",
+      "evidence_ref": "exp_esp.stderr:3"
+    },
+    {
+      "match": {
+        "function": "esp6_input",
+        "category": "decrypt_into_external_pages"
+      },
+      "target_state": "impact_pending",
+      "reason": "phase4 harness exercised IPv4-only path (xs->family = AF_INET); esp6_input shares the in-place decrypt code class; IPv6 SA + ESPv6 wire-format trigger needed before promoting to IMPACT_VERIFIED",
+      "evidence_ref": null
+    },
+    {
+      "match": {
+        "function": "rxkad_verify_packet_1",
+        "category": "decrypt_into_external_pages"
+      },
+      "target_state": "impact_verified",
+      "reason": "phase4 harness injected 'root::0:0:' into /etc/passwd page cache via AF_RXRPC sendmsg → rxkad_verify_packet_1 → crypto_skcipher_decrypt-over-page-cache; getent passwd root returned the empty-password entry via NSS independently; PoC stderr line 49 explicitly logged PRIMITIVE proven; on-disk file reverted by drop_caches",
+      "evidence_ref": "exp_rxrpc.stderr:49"
+    }
+  ]
+}

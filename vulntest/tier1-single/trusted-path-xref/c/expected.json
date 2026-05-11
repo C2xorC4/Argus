@@ -1,0 +1,44 @@
+{
+  "$schema": "../../../../skills/binary-ninja/scripts/output/finding-v2.schema.json",
+  "cell": {
+    "tier": 1,
+    "class": "trusted-path-xref",
+    "language": "c",
+    "platform": "windows",
+    "difficulty": 5
+  },
+  "findings": [
+    {
+      "category": "trusted_path_xref_to_load",
+      "severity": "high",
+      "function": "load_plugin",
+      "detector": "analysis.trusted_path",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"
+      ],
+      "cwe": ["CWE-345", "CWE-426"],
+      "mitre_attack": ["T1574"],
+      "description": "LoadLibraryW path literal C:\\Users\\Public\\... resolved by SSA xref",
+      "evidence_signatures": [
+        {"kind": "evidence_kind_present", "name": "path_literal_xref_to_load_callsite"},
+        {"kind": "details_contains", "key": "matched_token", "substring": "\\users\\public\\"}
+      ]
+    },
+    {
+      "category": "trusted_path_xref_to_load",
+      "severity": "high",
+      "function": "read_cache",
+      "detector": "analysis.trusted_path",
+      "knowledge_refs": [
+        "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"
+      ],
+      "cwe": ["CWE-345", "CWE-426"],
+      "mitre_attack": ["T1574"],
+      "description": "fopen path literal /tmp/... resolved by SSA xref",
+      "evidence_signatures": [
+        {"kind": "evidence_kind_present", "name": "path_literal_xref_to_load_callsite"},
+        {"kind": "details_contains", "key": "matched_token", "substring": "/tmp/"}
+      ]
+    }
+  ]
+}

@@ -238,40 +238,68 @@ def _extract_assignment_offset(inst) -> Optional[int]:
 
 
 def _trace_offset_any(expr, max_depth: int = 4) -> Optional[int]:
-    """Walk an MLIL expression tree, return the constant offset added
-    to a non-constant base. Returns None if the expression has no
-    additive constant on top of a single base variable.
+    """Walk an MLIL expression tree; return the SUM of constant terms
+    that are added to a SINGLE non-constant base variable. Returns
+    None when no constant is present, OR when the expression contains
+    a runtime-indexed term in addition to the base (e.g. `rax << 3`),
+    which would make the offset indeterminate.
 
     Caller doesn't care which base var; the offset+stride pattern is
     BYOVD-keying enough on its own (no other Windows-driver struct
     has 28 PVOID slots starting at +0x70).
+
+    Folds nested Add: `rcx + 0xb0 + 0x70` (parsed as
+    `(rcx + 0xb0) + 0x70`) returns 0x120. Compilers emit this shape
+    when DRIVER_OBJECT.MajorFunction is referenced through an
+    intermediate offset (e.g., GoFly64 — a base-pointer is rebased
+    inside DriverEntry and per-slot writes are then expressed as
+    `<rebased> + <slot_offset>` plus the original `0x70`).
     """
     if expr is None or max_depth <= 0:
         return None
+    nonconst, const_sum = _sum_offset_terms(expr, max_depth)
+    if nonconst != 1:
+        # Either zero base vars (pure constant — not a store-to-
+        # struct shape) or 2+ non-constant terms (runtime-indexed
+        # write). Both → no determinate offset.
+        return None
+    return const_sum
+
+
+def _sum_offset_terms(expr, max_depth: int = 4) -> tuple[int, int]:
+    """Recursively decompose `expr` into (nonconst_term_count,
+    constant_sum). Walks Add nodes; treats Shift / Mul / non-Add
+    subtrees that aren't pure constants as a single non-constant
+    term (so we can detect runtime-indexed writes).
+
+    Returns (count_of_distinct_nonconst_subtrees, sum_of_constants).
+    """
+    if expr is None or max_depth <= 0:
+        return (0, 0)
     op_name = type(expr).__name__
+    # Pure constant.
+    cv = _expr_const(expr)
+    if cv is not None:
+        return (0, int(cv))
     if "Add" in op_name:
-        operands = list(getattr(expr, "operands", []) or [])
+        # Recurse into children.
+        children = list(getattr(expr, "operands", []) or [])
         left = getattr(expr, "left", None)
         right = getattr(expr, "right", None)
         if left is not None and right is not None:
-            operands = [left, right]
-        if len(operands) != 2:
-            return None
-        a, b = operands
-        const_a = _expr_const(a)
-        const_b = _expr_const(b)
-        if const_a is not None and const_b is None:
-            return const_a
-        if const_b is not None and const_a is None:
-            return const_b
-        return None
-    for child_attr in ("src", "expr"):
-        child = getattr(expr, child_attr, None)
-        if child is not None:
-            r = _trace_offset_any(child, max_depth - 1)
-            if r is not None:
-                return r
-    return None
+            children = [left, right]
+        nonconst_total = 0
+        const_total = 0
+        for c in children:
+            nc, cs = _sum_offset_terms(c, max_depth - 1)
+            nonconst_total += nc
+            const_total += cs
+        return (nonconst_total, const_total)
+    # Non-Add, non-Const subtree — treat as a single opaque non-
+    # constant term. Examples: VarSsa, Shift (rax << 3), Mul, Load,
+    # Sub, etc. Recursing into these would falsely fold their
+    # internal constants (`rax << 3` would otherwise contribute 3).
+    return (1, 0)
 
 
 def _expr_const(expr) -> Optional[int]:

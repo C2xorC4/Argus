@@ -9,7 +9,7 @@
     "chain_depth": 4
   },
   "_notes": [
-    "All 4 EAC chain primitives now have implementing detectors as of 2026-05-07: permissive_sddl (analysis.sddl), pre_verification_write (analysis.integrity_check_order), missing_cleanup_on_failure (analysis.cleanup_dominance), trusted_path_cache_load (analysis.trusted_path). The chain template requires all 4. The cleanup + trusted-path detectors are minimal v1 — coarse-recall, expected to FP on innocuous binaries."
+    "All 4 EAC chain primitives have implementing detectors. Trusted-path slot is satisfied by either v1 (`trusted_path_cache_load`) or v2 (`trusted_path_xref_to_load`). On this fixture, the path literal `C:\\Windows\\Temp\\eac_target.bin` resolves cleanly through SSA — v2 fires and v1 is suppressed (v2 is strictly more informative)."
   ],
   "findings": [
     {
@@ -61,16 +61,18 @@
       ]
     },
     {
-      "category": "trusted_path_cache_load",
-      "severity": "medium",
+      "category": "trusted_path_xref_to_load",
+      "severity": "high",
+      "function": "wmain",
       "detector": "analysis.trusted_path",
       "primitive_index": 4,
       "knowledge_refs": ["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
       "cwe": ["CWE-345", "CWE-426"],
       "mitre_attack": ["T1574"],
-      "description": "binary references attacker-writable path strings and imports load-class APIs",
+      "description": "C:\\Windows\\Temp\\eac_target.bin resolved by SSA xref to load callsite",
       "evidence_signatures": [
-        {"kind": "string_constant", "value": "Temp"}
+        {"kind": "evidence_kind_present", "name": "path_literal_xref_to_load_callsite"},
+        {"kind": "details_contains", "key": "matched_token", "substring": "\\temp\\"}
       ]
     },
     {

@@ -65,6 +65,13 @@ _CHECK_SINKS: dict[str, int] = {
     "_waccess":             0,
     "_stat":                0,
     "_wstat":               0,
+    # C++ stdlib — std::filesystem::exists is defined in terms of
+    # status(); status() is what's actually imported. The path arg
+    # is `this`'s sibling reference, MLIL surfaces it as arg 0 of
+    # the call.
+    "std::filesystem::status":             0,
+    "std::filesystem::__cxx11::status":    0,
+    "std::filesystem::exists":             0,
 }
 
 
@@ -101,6 +108,14 @@ _USE_SINKS: dict[str, tuple[int, str]] = {
     "CopyFileW":           (1, "CopyFileW"),
     "SetFileAttributesA":  (0, "SetFileAttributesA"),
     "SetFileAttributesW":  (0, "SetFileAttributesW"),
+    # C++ stdlib file streams — constructor opens the path.
+    # `this` is arg 0, path is arg 1.
+    "std::ifstream::ifstream":  (1, "std::ifstream::ifstream"),
+    "std::ofstream::ofstream":  (1, "std::ofstream::ofstream"),
+    "std::fstream::fstream":    (1, "std::fstream::fstream"),
+    "std::ifstream::open":      (1, "std::ifstream::open"),
+    "std::ofstream::open":      (1, "std::ofstream::open"),
+    "std::fstream::open":       (1, "std::fstream::open"),
 }
 
 

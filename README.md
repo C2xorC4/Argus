@@ -145,7 +145,11 @@ Argus/
 ├── README.md                        ← this file
 ├── .gitignore
 ├── docs/                            ← architecture and methodology
-│   └── PIPELINE.md                  ← seven-stage pipeline (authoritative)
+│   ├── PIPELINE.md                  ← seven-stage pipeline (authoritative)
+│   ├── ANALYSIS_PLAYBOOK.md         ← operator manual analysis playbook
+│   ├── PROGRESSION.md               ← forward-work prioritisation and sprint plan
+│   ├── detection-gaps.md            ← exploitation pattern gaps identified in live runs
+│   └── DIRTY_FRAG_DETECTION_PLAN.md ← CVE-2026-43284/43500 detector design
 ├── agents/                          ← Claude Code agent definitions
 │   └── binary-research-orchestrator.md
 ├── skills/
@@ -187,7 +191,13 @@ Two layers reach the toolchain:
    *deterministic detection*.
 
 See [`docs/PIPELINE.md`](docs/PIPELINE.md) for the
-reference-book → stage → module mapping.
+reference-book → stage → module mapping. The detector design
+philosophy — TTP-altitude framing, v1/v2 layering, dominance
+scoping, FP gates, source/sink/propagator vocabulary — is
+captured in the LJM Knowledge entry
+`Memory/Knowledge/argus_detector_design_principles.md`. Read
+that first when designing a new detector or reviewing FP
+regressions.
 
 ## Finding state machine
 
@@ -318,7 +328,7 @@ against the binary itself and remains effective.
 | Permissive SDDL + NULL DACL | `analysis/sddl.py` (Plan A) | Done |
 | Pre-verification write (verify-dominates-commit + verify-presence v4) | `analysis/integrity_check_order.py` v4 | Done — gate-2 CLEAN |
 | Missing cleanup on failure | `analysis/cleanup_dominance.py` v2 (verify-call-presence gate) | Done — gate-2 CLEAN (suppresses notepad-class FPs) |
-| Trusted-path cache load | `analysis/trusted_path.py` v1 (binary-scope path-string + load-API) | Done — gate-2 CLEAN |
+| Trusted-path cache load | `analysis/trusted_path.py` v1 (binary-scope path-string + load-API) and v2 (per-callsite SSA xref from path literal to load API; HIGH severity, suppresses v1 when v2 fires) | Done — gate-2 CLEAN (0 FPs across 15-binary clean Windows corpus) |
 | Low-entropy PRNG seed | `analysis/crypto.py:find_low_entropy_seeds` (Plan C v1) | Done |
 | Synthetic PRNG sources from LCG constants | `analysis/crypto.py:_enumerate_synthetic_prng_call_sites` (Plan C v2) | Done |
 | CSPRNG-then-srand laundering | `analysis/crypto.py:find_csprng_laundered_to_prng` (Plan C v2) | Done |
@@ -331,7 +341,7 @@ against the binary itself and remains effective.
 | Linux exploit primitives (ret2win, egg-hunt, RWX-shellcode, alarm-timer, seccomp) | `analysis/linux_exploit.py` + `exploit/templates.py` (ret2win + egg-hunt PoC renderers) | Done |
 | UE5 source patterns | `analysis/source_surface.py:_scan_ue5_source_patterns` (Plan D v1) | Done |
 | BYOVD primitive class fingerprint | `heuristics/byovd_primitives.py` (E1-E7) | Done |
-| Windows kernel IRP dispatch wiring | `analysis/windows_drivers.py` (per-slot + bulk memfill) | Done |
+| Windows kernel IRP dispatch wiring | `analysis/windows_drivers.py` (per-slot + bulk memfill + nested-add offset fold for rebased-pointer shapes) | Done — 13/13 BYOVD-corpus IOCTL handlers resolved |
 | Tainted-pointer-dereference (CWE-822) | `analysis/taint.py` E4 | Done |
 | Inlined-memcpy structural detection | `analysis/taint.py` E5 | Done |
 | Hardening matrix (`/GS`, CFG, ASLR, CET, etc.) | `analysis/mitigations.py` | Done |

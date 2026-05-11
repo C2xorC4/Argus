@@ -159,6 +159,24 @@ SINKS: list[tuple[str, int, str]] = [
     ("openat",      1, "path_traversal"),
     ("CreateFileA", 0, "path_traversal"),
     ("CreateFileW", 0, "path_traversal"),
+    # C++ stdlib filestream constructors — `this` is arg 0, path arg 1.
+    # Itanium / GCC libstdc++ demangled forms; MSVC produces the
+    # same short_names through Binja's demangler.
+    ("std::ifstream::ifstream",    1, "path_traversal"),
+    ("std::ofstream::ofstream",    1, "path_traversal"),
+    ("std::fstream::fstream",      1, "path_traversal"),
+    ("std::wifstream::wifstream",  1, "path_traversal"),
+    ("std::wofstream::wofstream",  1, "path_traversal"),
+    ("std::ifstream::open",        1, "path_traversal"),
+    ("std::ofstream::open",        1, "path_traversal"),
+    ("std::fstream::open",         1, "path_traversal"),
+
+    # ── C++ stdin extraction — std::cin >> char[] ──────────────
+    # libstdc++ internal helper that the unbounded operator>>(istream&,
+    # char*) overload calls. No length argument → unbounded write into
+    # the target buffer. Same hazard class as gets()/strcpy() but in
+    # idiomatic C++.
+    ("std::__istream_extract",     1, "buffer_overflow"),
 
     # ── SQL — typically reached only when SQLite/etc. is linked ──
     ("sqlite3_exec",     1, "sql_injection"),
