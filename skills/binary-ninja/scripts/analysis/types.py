@@ -403,6 +403,271 @@ def find_type_confusion_candidates(bv, *, binary: str, arch: str, platform: str,
 
 
 # ─────────────────────────────────────────────────────────────────
+# Tagged-union misuse (C variant) — struct with enum-tag + union
+# accessed without preceding tag-check.
+# ─────────────────────────────────────────────────────────────────
+
+
+def _find_tagged_union_structs(bv):
+    """Enumerate type definitions for structs that look like tagged
+    unions: at least one member typed as an enum AND at least one
+    member typed as a union. Returns
+    {struct_type_name: (tag_offset, union_offset)}.
+    """
+    out: dict[str, tuple[int, int]] = {}
+    try:
+        type_list = list(bv.types)
+    except Exception:
+        return out
+    for entry in type_list:
+        # entry is (QualifiedName, Type) in recent Binja.
+        try:
+            qname, ty = entry
+        except Exception:
+            continue
+        if ty is None:
+            continue
+        # Structure types expose `.members`. Union types do too, but
+        # they don't carry the tag/union shape themselves.
+        members = getattr(ty, "members", None)
+        if not members:
+            continue
+        tag_off = None
+        union_off = None
+        for m in members:
+            mtype = getattr(m, "type", None)
+            if mtype is None:
+                continue
+            type_str = str(mtype).lower()
+            tcls = getattr(mtype, "type_class", None)
+            tcls_name = (getattr(tcls, "name", "") if tcls is not None else "") or ""
+            # Tag-like: explicit enum, or an integer field named
+            # `tag` / `type` / `kind` / `discriminator` / `which`.
+            is_enum = ("enum" in type_str or "Enumeration" in tcls_name)
+            mname = (getattr(m, "name", "") or "").lower()
+            is_named_tag = mname in {"tag", "type", "kind",
+                                     "discriminator", "which"}
+            if (is_enum or is_named_tag) and tag_off is None:
+                tag_off = int(getattr(m, "offset", 0))
+            # Union-like: explicit union or named-type-ref to a union.
+            if "union" in type_str:
+                if union_off is None:
+                    union_off = int(getattr(m, "offset", 0))
+        if tag_off is not None and union_off is not None and tag_off != union_off:
+            qstr = str(qname)
+            out[qstr] = (tag_off, union_off)
+    return out
+
+
+def _function_takes_pointer_to_struct(fn, struct_name: str) -> bool:
+    """True iff `fn` has at least one parameter typed as a pointer
+    to a struct whose qualified name matches `struct_name`."""
+    if fn is None:
+        return False
+    src_fn = getattr(fn, "source_function", None) or fn
+    params = list(getattr(src_fn, "parameter_vars", None) or [])
+    for p in params:
+        ptype = getattr(p, "type", None)
+        if ptype is None:
+            continue
+        type_str = str(ptype)
+        if struct_name in type_str and "*" in type_str:
+            return True
+    return False
+
+
+def _field_accesses_in_function(function, target_offset: int) -> list[int]:
+    """Return addresses where the function loads from `this->[+target_offset]`
+    via Binja's struct-aware field-load shapes (LoadStructSsa with
+    matching `.offset`, VarAliasedField with matching `.offset`, or
+    Add(base, const)-style Load whose const matches target_offset).
+    """
+    out: list[int] = []
+    if function is None:
+        return out
+    mlil = getattr(function, "mlil", None) or function
+    ssa = getattr(mlil, "ssa_form", None) or mlil
+    for inst in (getattr(ssa, "instructions", []) or []):
+        src = getattr(inst, "src", None)
+        if src is None:
+            continue
+        op_name = type(src).__name__
+        # LoadStructSsa or VarAliasedField — `.offset` attribute
+        if ("LoadStruct" in op_name or "AliasedField" in op_name or
+                "AliasField" in op_name):
+            off = getattr(src, "offset", None)
+            if isinstance(off, int) and int(off) == int(target_offset):
+                out.append(int(getattr(inst, "address", 0) or 0))
+                continue
+        # Generic Load with Add(base, const)
+        if "Load" in op_name:
+            inner = getattr(src, "src", None)
+            if inner is not None and "Add" in type(inner).__name__:
+                left = getattr(inner, "left", None)
+                right = getattr(inner, "right", None)
+                for op in (left, right):
+                    if op is None:
+                        continue
+                    cv = getattr(op, "constant", None)
+                    if cv is not None and int(cv) == int(target_offset):
+                        out.append(int(getattr(inst, "address", 0) or 0))
+                        break
+    return out
+
+
+def _has_compare_on_tag(function, tag_load_addrs: list[int]) -> bool:
+    """True if any compare/conditional-branch instruction in the
+    function reads a value transitively defined by a tag load."""
+    if function is None or not tag_load_addrs:
+        return False
+    mlil = getattr(function, "mlil", None) or function
+    ssa = getattr(mlil, "ssa_form", None) or mlil
+    # Collect SSA vars defined at the tag load addresses.
+    tag_def_vars: set[str] = set()
+    for inst in (getattr(ssa, "instructions", []) or []):
+        addr = int(getattr(inst, "address", 0) or 0)
+        if addr not in tag_load_addrs:
+            continue
+        dst = getattr(inst, "dest", None)
+        if dst is None:
+            continue
+        name = getattr(getattr(dst, "var", None), "name", None) or getattr(dst, "name", None)
+        version = getattr(dst, "version", None)
+        if name is not None and version is not None:
+            tag_def_vars.add(f"{name}#{version}")
+    if not tag_def_vars:
+        return False
+
+    # BFS through SetVar copy chains starting from tag_def_vars.
+    reachable = set(tag_def_vars)
+    changed = True
+    iterations = 0
+    while changed and iterations < 8:
+        changed = False
+        iterations += 1
+        for inst in (getattr(ssa, "instructions", []) or []):
+            if "SetVar" not in type(inst).__name__:
+                continue
+            src = getattr(inst, "src", None)
+            if src is None:
+                continue
+            sv = ilh.expr_to_ssa_var(src)
+            if sv is None:
+                continue
+            name = getattr(getattr(sv, "var", None), "name", None) or ""
+            version = getattr(sv, "version", None)
+            key = f"{name}#{version}" if version is not None else ""
+            if key in reachable:
+                dst = getattr(inst, "dest", None)
+                if dst is None:
+                    continue
+                dn = getattr(getattr(dst, "var", None), "name", None) or ""
+                dv = getattr(dst, "version", None)
+                dk = f"{dn}#{dv}" if dv is not None else ""
+                if dk and dk not in reachable:
+                    reachable.add(dk)
+                    changed = True
+
+    # Look for any Cmp/If whose operand is in `reachable`.
+    for inst in (getattr(ssa, "instructions", []) or []):
+        op = type(inst).__name__
+        cond = None
+        if "If" in op:
+            cond = getattr(inst, "condition", None)
+        if cond is None and "Cmp" in op:
+            cond = inst
+        if cond is None:
+            continue
+        # Walk operands looking for an SSA var in `reachable`.
+        for child in (getattr(cond, "operands", None) or [cond]):
+            sv = ilh.expr_to_ssa_var(child)
+            if sv is None:
+                continue
+            name = getattr(getattr(sv, "var", None), "name", None) or ""
+            version = getattr(sv, "version", None)
+            key = f"{name}#{version}" if version is not None else ""
+            if key in reachable:
+                return True
+    return False
+
+
+def find_tagged_union_misuse(bv, *, binary: str, arch: str,
+                             platform: str,
+                             detector: str = "analysis.types",
+                             ) -> list[Finding]:
+    findings: list[Finding] = []
+    if bv is None:
+        return findings
+    struct_index = _find_tagged_union_structs(bv)
+    if not struct_index:
+        return findings
+
+    meta = {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-843"],
+        "mitre": ["T1203"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/ec_undefined_behavior_taxonomy]]",
+            "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]",
+        ],
+    }
+
+    for struct_name, (tag_off, union_off) in struct_index.items():
+        for fn in (bv.functions or []):
+            if not _function_takes_pointer_to_struct(fn, struct_name):
+                continue
+            union_accesses = _field_accesses_in_function(fn, union_off)
+            if not union_accesses:
+                continue
+            tag_loads = _field_accesses_in_function(fn, tag_off)
+            # If there's a tag load AND a compare dominated by it,
+            # consider the function tag-checked. Otherwise emit.
+            if tag_loads and _has_compare_on_tag(fn, tag_loads):
+                continue
+            sf = getattr(fn, "source_function", None) or fn
+            fname = getattr(sf, "name", "") or f"sub_{getattr(sf, 'start', 0):x}"
+            addr = int(union_accesses[0])
+            findings.append(Finding(
+                id="",
+                category="type_confusion",
+                severity=meta["severity"],
+                address=addr,
+                function=fname,
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                knowledge_refs=list(meta["knowledge_refs"]),
+                cwe=list(meta["cwe"]),
+                mitre_attack=list(meta["mitre"]),
+                description=(
+                    f"{fname}: accesses union member at "
+                    f"`{struct_name}.[+0x{union_off:x}]` without a "
+                    f"preceding compare on the tag field at "
+                    f"`+0x{tag_off:x}`. Tagged-union misuse — if the "
+                    f"tag indicates a different variant, the union "
+                    f"bytes are reinterpreted as the wrong type."
+                ),
+                evidence=[Evidence(
+                    kind="tagged_union_access_without_tag_check",
+                    source=detector,
+                    payload=(f"struct={struct_name} "
+                             f"tag_offset=0x{tag_off:x} "
+                             f"union_offset=0x{union_off:x} "
+                             f"union_access_addr=0x{addr:x} "
+                             f"tag_load_count={len(tag_loads)}"),
+                    address=addr,
+                    function=fname,
+                )],
+                details={
+                    "struct_name": struct_name,
+                    "tag_offset": hex(tag_off),
+                    "union_offset": hex(union_off),
+                    "tag_load_count": len(tag_loads),
+                },
+            ))
+    return findings
+
+
+# ─────────────────────────────────────────────────────────────────
 # Public entry
 # ─────────────────────────────────────────────────────────────────
 
@@ -419,6 +684,11 @@ def analyze(session, *, binary: Optional[str] = None,
     arch = arch or (str(bv.arch) if bv.arch else "unknown")
     platform = platform or (str(bv.platform) if bv.platform else "unknown")
 
-    return find_type_confusion_candidates(
+    out: list[Finding] = []
+    out.extend(find_type_confusion_candidates(
         bv, binary=binary, arch=arch, platform=platform, detector=detector,
-    )
+    ))
+    out.extend(find_tagged_union_misuse(
+        bv, binary=binary, arch=arch, platform=platform, detector=detector,
+    ))
+    return out
