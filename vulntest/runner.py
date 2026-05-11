@@ -121,13 +121,18 @@ def _function_name_matches(expected: str, got: str) -> bool:
       - Bare expected identifier appears anywhere inside got's bare form
         (covers thunk wrappers like `j_?issue_token@@...`).
     """
-    if not expected or not got:
+    if not expected:
+        return False
+    # Tier-3 stripped-symbol placeholder: `sub_<addr>` / `<*>` / `*`
+    # all mean "accept any function" — checked before the empty-got
+    # guard so byte-pattern findings (whose `function` is "" when the
+    # match isn't inside a defined function) still match the
+    # placeholder.
+    if "<addr>" in expected or "<*>" in expected or expected.strip() in ("*", "<*>"):
+        return True
+    if not got:
         return False
     if got == "<binary>":
-        return True
-    # Tier-3 stripped-symbol placeholder: `sub_<addr>` / `<*>` / `*`
-    # all mean "accept any function".
-    if "<addr>" in expected or "<*>" in expected or expected.strip() in ("*", "<*>"):
         return True
     if expected in got:
         return True
@@ -557,8 +562,12 @@ def evaluate_cell(cell_path: Path, *, run_clean: bool = True,
                 vuln_profile, cat_findings, max_depth=3,
             )
             funcs_with_callers = funcs | caller_funcs
+            # Pass empty `mf` through too — `_function_name_matches`
+            # accepts the `<addr>` placeholder for byte-pattern
+            # findings whose `function` is empty (no enclosing
+            # function — match is in `.rdata` / `.data`).
             if not any(_function_name_matches(exp_func, mf)
-                       for mf in funcs_with_callers if mf):
+                       for mf in funcs_with_callers):
                 result.verdict[cat] = f"PASS-warn-fn (got {sorted(funcs)})"
                 continue
 

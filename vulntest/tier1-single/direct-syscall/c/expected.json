@@ -11,7 +11,7 @@
     {
       "category": "direct_syscall_stub",
       "severity": "high",
-      "function": "do_syscall",
+      "function": "<addr>",
       "detector": "analysis/taint.py",
       "knowledge_refs": [
         "[[Memory/Knowledge/em_direct_syscall_ssn_resolution]]"
