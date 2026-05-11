@@ -158,3 +158,10 @@ vulntest/**/*.ilk
 # goes in config/argus.local.toml. The .example template is committed;
 # the working file is not.
 config/argus.local.toml
+
+# ── Multi-language build outputs / metadata ─────────────────────
+vulntest/**/source/obj/
+vulntest/**/source/bin/
+vulntest/**/source/Cargo.lock
+vulntest/**/source/target/
+vulntest/**/build_target/
