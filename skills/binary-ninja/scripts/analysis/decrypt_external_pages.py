@@ -1,18 +1,23 @@
-"""Decrypt-into-externally-owned-pages detector (Dirty Frag class).
+"""Decrypt-into-externally-owned-pages detector.
 
-Detects the structural shape behind CVE-2026-43284 (IPsec ESP) and
-CVE-2026-43500 (rxrpc). When a Linux kernel module imports BOTH a
-scatterlist-from-SKB constructor AND a crypto decrypt sink AND
-does NOT import any privately-own gate, the binary plausibly
-contains the dirty-frag bug class — in-place decrypt over SKB
-pages that may be externally-owned (pipe pages from splice).
+Generic bug-class detector: a Linux kernel module that imports
+BOTH a scatterlist-from-SKB constructor AND a crypto decrypt sink
+AND does NOT import any privately-own gate contains the shape of
+in-place decryption over SKB fragments that may be externally
+owned (pipe pages from splice / vmsplice / MSG_SPLICE_PAGES).
+When the fragments aren't privately owned, the decrypt writes
+plaintext into attacker-readable memory.
 
-v1 (this revision) is binary-scope: import co-presence triggers
-emission. High-recall, low-precision — appropriate for the
-"first pass" against a corpus where the analyst follows up with
-manual review per finding. v2 will tighten via per-function CFG
-analysis (constructor → sink edge unguarded by `skb_cow_data` /
-`skb_unclone` / `pskb_expand_head` etc.).
+This detector targets the bug-class shape — not a specific CVE.
+Real-world examples in the same class include CVE-2026-43284
+(IPsec ESP) and CVE-2026-43500 (rxrpc), which the same detector
+emits against organically without per-CVE tuning.
+
+v1 — binary-scope: import co-presence triggers emission. High-
+recall, low-precision; useful first-pass triage.
+v2 — per-function CFG-aware: constructor → sink dominance edge
+not guarded by `skb_cow_data` / `skb_unclone` /
+`pskb_expand_head` etc. Lower-recall but per-callsite precision.
 
 Knowledge anchors:
 - `[[Memory/Knowledge/dirty_frag_decrypt_into_external_pages]]`
