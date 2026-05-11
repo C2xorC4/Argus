@@ -56,6 +56,15 @@ CATEGORY_META = {
             "[[Memory/Knowledge/argus_detector_design_principles]]",
         ],
     },
+    "heap_buffer_overflow": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-122"],
+        "mitre": ["T1203"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/wnapi_heap_internals]]",
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+        ],
+    },
 }
 
 
@@ -63,6 +72,30 @@ _DELETE_CALLEES: frozenset[str] = frozenset({
     "operator delete", "operator delete[]",
     "free", "_free", "__free",
 })
+
+
+# Unbounded / under-bounded buffer copies. arg-index of the size
+# operand maps to `_arg_size_index`. When the dst arg traces to a
+# `this->field` load AND the size operand is non-constant, the
+# call is a candidate heap-buffer-overflow in a class method.
+_COPY_INTO_BUFFER_SINKS: dict[str, int] = {
+    "memcpy":    2,
+    "memmove":   2,
+    "strncpy":   2,
+    "strncat":   2,
+    "wcsncpy":   2,
+    "lstrcpyn":  2,
+    "lstrcpynA": 2,
+    "lstrcpynW": 2,
+    "memcpy_s":  2,
+    # Unbounded family — even more dangerous; no size operand at all.
+    "strcpy":    None,
+    "strcat":    None,
+    "wcscpy":    None,
+    "lstrcpy":   None,
+    "lstrcpyA":  None,
+    "lstrcpyW":  None,
+}
 
 
 def _ssa_id(ssa_var) -> str:
@@ -1097,4 +1130,157 @@ def analyze(session, *, binary: Optional[str] = None,
     out.extend(find_cross_function_double_free(
         bv, binary=binary, arch=arch, platform=platform, detector=detector,
     ))
+    out.extend(find_cpp_class_heap_overflow(
+        bv, binary=binary, arch=arch, platform=platform, detector=detector,
+    ))
     return out
+
+
+# ─────────────────────────────────────────────────────────────────
+# (4) Heap buffer overflow in C++ class methods — memcpy into
+#     `this->field` with non-constant size and no dominating bound.
+# ─────────────────────────────────────────────────────────────────
+
+
+def _is_copy_into_buffer(bv, call_inst):
+    """If `call_inst` calls a buffer-copy sink, return
+    (sink_name, size_arg_index_or_None). Else (None, None).
+    """
+    dest = getattr(call_inst, "dest", None)
+    if dest is None:
+        return (None, None)
+    cval = getattr(dest, "constant", None)
+    if cval is None:
+        return (None, None)
+    sym = bv.get_symbol_at(int(cval))
+    if sym is None:
+        return (None, None)
+    sn = getattr(sym, "short_name", None) or getattr(sym, "name", None) or ""
+    if sn not in _COPY_INTO_BUFFER_SINKS:
+        return (None, None)
+    return (sn, _COPY_INTO_BUFFER_SINKS[sn])
+
+
+def _is_constant_expr(expr) -> bool:
+    """True iff `expr` resolves to a constant integer (literal or
+    `value` constant)."""
+    if expr is None:
+        return False
+    cv = getattr(expr, "constant", None)
+    if cv is not None:
+        return True
+    val = getattr(expr, "value", None)
+    if val is not None:
+        vtype = getattr(val, "type", None)
+        type_name = (getattr(vtype, "name", "") or str(vtype) or "").lower()
+        if "constant" in type_name:
+            return True
+    return False
+
+
+def find_cpp_class_heap_overflow(bv, *, binary: str, arch: str,
+                                 platform: str,
+                                 detector: str = "analysis.cross_function_heap",
+                                 ) -> list[Finding]:
+    """Class-method heap-buffer-overflow detector.
+
+    For each member method (function whose demangled name contains
+    `::`), find calls to buffer-copy sinks (`memcpy`, `strncpy`,
+    `strcpy`, etc.) where:
+      - The destination arg resolves to a load of `this->[+offset]`
+        (Add-form Load or VarAliasedField).
+      - The size arg (when present) is NOT a constant integer.
+
+    The shape captures `class Buffer { ...; data_ = new char[N];
+    void store(const std::string& s) { memcpy(data_, s.data(),
+    s.size()); } };` — the canonical heap-overflow class-method
+    pattern where the destination is sized at construction and
+    the copy length is attacker-controlled.
+
+    v1 emits regardless of dominating bound check — false-positive
+    rate stays low because the dst-is-this-field constraint is
+    strong. v2 would gate emission on absence of dominating
+    comparison against `this->size_` (or similar).
+    """
+    findings: list[Finding] = []
+    if bv is None:
+        return findings
+    classes = _classify_class_methods(bv)
+    if not classes:
+        return findings
+    meta = CATEGORY_META["heap_buffer_overflow"]
+    seen_keys: set[tuple[str, str, int]] = set()
+    for cls, methods in classes.items():
+        for mname, fn in methods:
+            arg_family = _arg0_ssa_family(fn)
+            if not arg_family:
+                continue
+            mlil = getattr(fn, "mlil", None) or fn
+            ssa = getattr(mlil, "ssa_form", None) or mlil
+            for inst in (getattr(ssa, "instructions", []) or []):
+                if "Call" not in type(inst).__name__:
+                    continue
+                sink_name, size_idx = _is_copy_into_buffer(bv, inst)
+                if sink_name is None:
+                    continue
+                params = ilh.call_params(inst)
+                if not params:
+                    continue
+                # Destination arg traces to `this->[+offset]`.
+                dst_offset = _resolve_load_offset_for_arg(
+                    ssa, params[0], arg_family,
+                )
+                if dst_offset is None:
+                    continue
+                # Size operand: when present, non-constant flags it.
+                # When the sink is unbounded (strcpy / strcat / wcscpy),
+                # there's no size to check — always flag.
+                if size_idx is not None:
+                    if size_idx >= len(params):
+                        continue
+                    if _is_constant_expr(params[size_idx]):
+                        continue
+                addr = int(getattr(inst, "address", 0) or 0)
+                method_full = f"{cls}::{mname}"
+                key = (cls, mname, addr)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                findings.append(Finding(
+                    id="",
+                    category="heap_buffer_overflow",
+                    severity=meta["severity"],
+                    address=addr,
+                    function=method_full,
+                    binary=binary, arch=arch, platform=platform,
+                    detector=detector,
+                    knowledge_refs=list(meta["knowledge_refs"]),
+                    cwe=list(meta["cwe"]),
+                    mitre_attack=list(meta["mitre"]),
+                    description=(
+                        f"{method_full}: {sink_name}@0x{addr:x} writes "
+                        f"into `this->[+0x{dst_offset:x}]` with a "
+                        f"non-constant size operand. The destination "
+                        f"is a heap-allocated field of the class; "
+                        f"unless the size is bounded against the "
+                        f"allocation, attacker-controlled input "
+                        f"length produces a heap-buffer-overflow."
+                    ),
+                    evidence=[Evidence(
+                        kind="class_method_memcpy_into_this_field",
+                        source=detector,
+                        payload=(f"class={cls} method={mname} "
+                                 f"sink={sink_name} "
+                                 f"dst_offset=0x{dst_offset:x} "
+                                 f"call_addr=0x{addr:x}"),
+                        address=addr,
+                        function=method_full,
+                    )],
+                    details={
+                        "class_name": cls,
+                        "method": mname,
+                        "sink": sink_name,
+                        "dst_this_offset": hex(dst_offset),
+                    },
+                ))
+    return findings
