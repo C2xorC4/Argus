@@ -172,6 +172,101 @@ from scripts.lib.knowledge import (                                  # noqa: E40
 )
 from scripts.triage import auto_triage                               # noqa: E402
 from scripts.exploit import build as build_pocs                      # noqa: E402
+from scripts.verify import verify_finding_locally                    # noqa: E402
+from scripts.lib.state import FindingState, transition               # noqa: E402
+
+# Toggled by --no-verify / --verify CLI flags. Default: verification ON.
+_verify_enabled: bool = True
+
+
+def _run_local_verifications(session, findings, pocs, binary_path):
+    """For each per-finding PoC, execute it via the local Phase-4
+    harness and walk the source finding to IMPACT_VERIFIED if the
+    harness reports verified-grade evidence.
+
+    Skipped for cells whose binary lives under a non-C/C++ language
+    directory (`/go/`, `/rust/`, `/csharp/`) — those binaries hit
+    the MSVC-C-flavored detectors with runtime-pattern false
+    positives (Go's runtime has many `<=` comparisons matching the
+    off-by-one shape; .NET's CLR loader stub has all sorts of
+    spurious format-string anchors). Verification of those cells
+    needs per-language detectors first; running them as-is
+    produces hundreds of PoCs per cell and verifies them all
+    "successfully" via subprocess crash, which is misleading.
+
+    Returns the count of findings walked to IMPACT_VERIFIED.
+    """
+    bp = (binary_path or "").replace("\\", "/").lower()
+    for skip in ("/go/", "/rust/", "/csharp/"):
+        if skip in bp:
+            print(f"      [phase4] skipped — multi-lang cell "
+                  f"({skip.strip('/')}); per-language detection pending")
+            return 0
+
+    findings_by_id = {getattr(f, "id", "") or "": f for f in findings}
+    verified = 0
+    # De-duplicate by (binary, category) — running the same PoC
+    # template against the same binary for N findings of the same
+    # category produces N identical executions. The category PoC
+    # template only varies on category, not on the specific
+    # finding's function / address. Verifying once per category
+    # per binary is sufficient — when verified, we walk ALL
+    # findings of that category in this binary to IMPACT_VERIFIED.
+    by_cat: dict[tuple, list] = {}
+    for poc in pocs:
+        if not getattr(poc, "chain_name", "").startswith("finding_poc."):
+            continue
+        script = getattr(poc, "exploit_script", None)
+        if not script:
+            continue
+        fid = getattr(poc, "source_chain_finding_id", "") or ""
+        finding = findings_by_id.get(fid)
+        if finding is None:
+            continue
+        if (getattr(finding, "category", "") in
+                ("decrypt_into_external_pages",
+                 "kernel_oob_write_at_offset")):
+            continue
+        key = (binary_path, getattr(finding, "category", ""))
+        by_cat.setdefault(key, []).append((poc, finding, script))
+
+    for (bin_path, category), entries in by_cat.items():
+        # Run ONE PoC for the category (the first entry's script).
+        poc, finding, script = entries[0]
+        try:
+            res = verify_finding_locally(finding, script, timeout_s=15)
+        except Exception as e:
+            print(f"      [warn] verify {finding.category}: "
+                  f"{type(e).__name__}: {e}")
+            continue
+        if not getattr(res, "impact_verified_evidence", False):
+            continue
+        # Walk EVERY finding in this category for this binary.
+        notes = (f"local-verify rc={res.trigger_returncode} "
+                 f"any_file_changed={res.any_file_changed} "
+                 f"pattern_matches={len(res.dmesg_matches)}")
+        for _poc, fnd, _ in entries:
+            try:
+                for tgt in (FindingState.CONFIRMED,
+                            FindingState.IMPACT_PENDING,
+                            FindingState.IMPACT_VERIFIED):
+                    if fnd.state == tgt:
+                        continue
+                    new_state, _ = transition(
+                        fnd.state, tgt,
+                        actor="runner.local_verify",
+                        notes=notes,
+                        history=getattr(fnd, "state_history", None),
+                    )
+                    fnd.state = new_state
+                verified += 1
+            except Exception as e:
+                print(f"      [warn] state walk {fnd.category}: "
+                      f"{type(e).__name__}: {e}")
+        print(f"      [verify] {category} -> IMPACT_VERIFIED "
+              f"({len(entries)} finding(s) walked)")
+    return verified
+
 
 
 DETECTORS = [
@@ -287,6 +382,21 @@ def run_pipeline(binary_path: Path) -> tuple[list, dict[str, float], dict]:
         times["chains"] = len(chain_findings)
         times["triaged"] = promoted
         times["pocs"] = len(pocs)
+
+        # Phase 4 — local-verify the per-finding PoCs. Each PoC whose
+        # category has a renderer is executed via the local harness;
+        # findings whose verifier returns IMPACT_VERIFIED are walked
+        # CONFIRMED → IMPACT_PENDING → IMPACT_VERIFIED via the state
+        # machine. Skip if verification is disabled (e.g. --no-verify).
+        global _verify_enabled
+        verified_count = 0
+        if _verify_enabled and pocs:
+            print(f"      [phase4] running local-verify on {len(pocs)} PoCs...")
+            verified_count = _run_local_verifications(
+                session, findings, pocs, str(binary_path),
+            )
+            print(f"      [phase4] verified {verified_count} finding(s)")
+        times["verified"] = verified_count
 
         # Capture per-finding caller-chain function names while the bv
         # is still open — used by the WARN-fn gate to match expected
@@ -634,7 +744,25 @@ def main(argv: list[str]) -> int:
                     help=("Run substrate-coherence check (jm associate) "
                           "against each finding's knowledge_refs; report "
                           "incoherent citations per cell."))
+    ap.add_argument("--no-verify", action="store_true",
+                    help=("Skip Phase-4 local verification (PoC execution + "
+                          "verdict). Detection + chain match + auto_triage "
+                          "still run."))
+    ap.add_argument("--verify", action="store_true",
+                    help=("Enable Phase-4 local verification (default). "
+                          "Per-finding PoCs run via the local harness; "
+                          "successful verdicts walk findings to "
+                          "IMPACT_VERIFIED."))
+    ap.add_argument("--c-cpp-only", action="store_true",
+                    help=("Skip cells whose binary path is under a non-C/C++ "
+                          "language directory (/go/, /rust/, /csharp/). "
+                          "Useful when iterating on Windows native targets; "
+                          "multi-language cells need per-language detector "
+                          "tuning and are too noisy to verify reliably."))
     args = ap.parse_args(argv[1:])
+
+    global _verify_enabled
+    _verify_enabled = not args.no_verify
 
     vulntest_root = Path(__file__).resolve().parent
     cfg = load_config()
@@ -644,6 +772,12 @@ def main(argv: list[str]) -> int:
     cells = discover_cells(vulntest_root)
     if args.filter:
         cells = [c for c in cells if args.filter in str(c)]
+    if args.c_cpp_only:
+        before = len(cells)
+        cells = [c for c in cells
+                 if not any(seg in str(c).replace("\\", "/").lower()
+                            for seg in ("/go/", "/rust/", "/csharp/"))]
+        print(f"--c-cpp-only: filtered {before - len(cells)} multi-lang cells")
     print(f"Cells: {len(cells)}")
 
     results: list[CellResult] = []
