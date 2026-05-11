@@ -10,9 +10,11 @@
     {
       "category": "use_after_free",
       "severity": "high",
-      "function": "vuln::main",
+      "function": "<addr>",
       "detector": "analysis/heap.py",
-      "cwe": ["CWE-416"],
+      "cwe": [
+        "CWE-416"
+      ],
       "description": "Box::into_raw + Box::from_raw frees the heap object; subsequent (*raw).value reads after free"
     }
   ]

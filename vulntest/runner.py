@@ -38,9 +38,13 @@ def _resolve_cell_binary(cell_dir: Path, spec: dict) -> "Path | None":
          under `cell/binary/`. Used by `known-positive/CVE-*` cells
          whose binaries are real-world drivers / kernel modules with
          CVE-canonical names.
-      2. `cell/build/vuln.exe` — the standard MSVC build output for
-         synthetic tier1/tier2 fixtures.
-      3. Any `*.sys`, `*.ko`, `*.elf`, or `*.exe` in `cell/binary/`
+      2. C# cells (`cell.language == "csharp"`): prefer
+         `cell/build/vuln.dll` (the managed assembly) over
+         `cell/build/vuln.exe` (which is just the apphost-shim CLR
+         loader). The dll carries the actual IL + metadata.
+      3. `cell/build/vuln.exe` — the standard MSVC / Go / Rust
+         build output for synthetic tier1/tier2 fixtures.
+      4. Any `*.sys`, `*.ko`, `*.elf`, `*.exe` in `cell/binary/`
          — fallback for cells that ship a pre-built binary without
          declaring a basename.
     """
@@ -50,6 +54,10 @@ def _resolve_cell_binary(cell_dir: Path, spec: dict) -> "Path | None":
         candidate = cell_dir / "binary" / basename
         if candidate.exists():
             return candidate
+    if (cell_meta.get("language") or "").lower() == "csharp":
+        managed = cell_dir / "build" / "vuln.dll"
+        if managed.exists():
+            return managed
     standard = cell_dir / "build" / "vuln.exe"
     if standard.exists():
         return standard
@@ -152,9 +160,9 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from scripts.lib import BinjaSession, load_config                    # noqa: E402
 from scripts.analysis import (                                       # noqa: E402
     cleanup_dominance, crypto, cross_function_heap, decrypt_external_pages,
-    dynamic_sink_arg, evasion_structures, heap, integrity_check_order,
-    linux_exploit, obfuscation, off_by_one, race, sddl, surface, taint,
-    trusted_path, types, uninit, windows_drivers,
+    dotnet_managed, dynamic_sink_arg, evasion_structures, heap,
+    integrity_check_order, linux_exploit, obfuscation, off_by_one, race,
+    sddl, surface, taint, trusted_path, types, uninit, windows_drivers,
 )
 from scripts.heuristics import chains as heur_chains                 # noqa: E402
 from scripts.heuristics._base import imports_in, strings_in          # noqa: E402
@@ -183,6 +191,7 @@ DETECTORS = [
     ("evasion_structures", evasion_structures),
     ("off_by_one", off_by_one),
     ("cross_function_heap", cross_function_heap),
+    ("dotnet_managed", dotnet_managed),
     ("decrypt_external_pages", decrypt_external_pages),
     ("linux_exploit", linux_exploit),
 ]

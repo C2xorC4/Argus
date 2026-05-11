@@ -10,12 +10,14 @@
     {
       "category": "stack_buffer_overflow",
       "severity": "high",
-      "function": "vuln::greet",
+      "function": "<addr>",
       "detector": "analysis/taint.py",
       "knowledge_refs": [
         "[[Memory/Knowledge/hw_stack_overflow_mechanics]]"
       ],
-      "cwe": ["CWE-121"],
+      "cwe": [
+        "CWE-121"
+      ],
       "description": "unsafe ptr::copy_nonoverlapping into stack-allocated [u8; 64] with no length clamp"
     }
   ]

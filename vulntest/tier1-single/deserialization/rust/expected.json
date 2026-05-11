@@ -10,9 +10,11 @@
     {
       "category": "insecure_deserialization",
       "severity": "medium",
-      "function": "vuln::main",
+      "function": "<addr>",
       "detector": "analysis/taint.py",
-      "cwe": ["CWE-502"],
+      "cwe": [
+        "CWE-502"
+      ],
       "description": "bincode::deserialize on attacker-controlled bytes with no length cap; allocations driven by attacker"
     }
   ]

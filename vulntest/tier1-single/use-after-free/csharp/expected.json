@@ -10,9 +10,11 @@
     {
       "category": "use_after_dispose",
       "severity": "medium",
-      "function": "Vuln.Main",
+      "function": "<addr>",
       "detector": "analysis/heap.py",
-      "cwe": ["CWE-416"],
+      "cwe": [
+        "CWE-416"
+      ],
       "description": "Method call on IDisposable instance after Dispose() returned"
     }
   ]

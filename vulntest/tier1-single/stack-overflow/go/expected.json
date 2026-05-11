@@ -10,12 +10,14 @@
     {
       "category": "stack_buffer_overflow",
       "severity": "high",
-      "function": "_cgo_<hash>_Cfunc_greet",
+      "function": "<addr>",
       "detector": "analysis/taint.py",
       "knowledge_refs": [
         "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]"
       ],
-      "cwe": ["CWE-121"],
+      "cwe": [
+        "CWE-121"
+      ],
       "description": "cgo C function uses strcpy on attacker-controlled string from Go caller"
     }
   ]

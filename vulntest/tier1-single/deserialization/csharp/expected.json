@@ -10,14 +10,24 @@
     {
       "category": "insecure_deserialization",
       "severity": "critical",
-      "function": "Vuln.Main",
+      "function": "<addr>",
       "detector": "analysis/taint.py",
-      "cwe": ["CWE-502"],
-      "mitre_attack": ["T1190"],
+      "cwe": [
+        "CWE-502"
+      ],
+      "mitre_attack": [
+        "T1190"
+      ],
       "description": "BinaryFormatter.Deserialize on attacker-controlled stream",
       "evidence_signatures": [
-        {"kind": "managed_type_reference", "type": "System.Runtime.Serialization.Formatters.Binary.BinaryFormatter"},
-        {"kind": "method_call", "method": "BinaryFormatter.Deserialize"}
+        {
+          "kind": "managed_type_reference",
+          "type": "System.Runtime.Serialization.Formatters.Binary.BinaryFormatter"
+        },
+        {
+          "kind": "method_call",
+          "method": "BinaryFormatter.Deserialize"
+        }
       ]
     }
   ]

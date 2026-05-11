@@ -10,9 +10,11 @@
     {
       "category": "type_confusion",
       "severity": "high",
-      "function": "Vuln.Confused",
+      "function": "<addr>",
       "detector": "analysis/taint.py",
-      "cwe": ["CWE-843"],
+      "cwe": [
+        "CWE-843"
+      ],
       "description": "unsafe pointer reinterpretation between incompatible structs"
     }
   ]

@@ -10,12 +10,14 @@
     {
       "category": "type_confusion",
       "severity": "high",
-      "function": "main.main",
+      "function": "<addr>",
       "detector": "analysis/taint.py",
       "knowledge_refs": [
         "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]"
       ],
-      "cwe": ["CWE-843"],
+      "cwe": [
+        "CWE-843"
+      ],
       "description": "*(*B)(unsafe.Pointer(&a)) reinterprets struct A bytes as struct B"
     }
   ]

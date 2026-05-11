@@ -10,9 +10,11 @@
     {
       "category": "insecure_deserialization",
       "severity": "medium",
-      "function": "main.main",
+      "function": "<addr>",
       "detector": "analysis/taint.py",
-      "cwe": ["CWE-502"],
+      "cwe": [
+        "CWE-502"
+      ],
       "description": "encoding/gob Decode on attacker-controlled bytes with no allocation cap"
     }
   ]

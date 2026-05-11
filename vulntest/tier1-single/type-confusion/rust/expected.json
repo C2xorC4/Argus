@@ -10,9 +10,11 @@
     {
       "category": "type_confusion",
       "severity": "high",
-      "function": "vuln::main",
+      "function": "<addr>",
       "detector": "analysis/taint.py",
-      "cwe": ["CWE-843"],
+      "cwe": [
+        "CWE-843"
+      ],
       "description": "std::mem::transmute between structs with different validity invariants"
     }
   ]
