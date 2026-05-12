@@ -319,6 +319,25 @@ def passes_negative_context(pattern: Pattern, *, function_name: str = "",
     excluded_module = nc.get("module_name")
     if excluded_module and module_name == excluded_module:
         return False
+    # `module_name_any` accepts a tuple/list of module-name strings;
+    # any case-insensitive match disqualifies the emission. Used for
+    # WoW64 thunk DLLs (wow64*.dll, xtajit*.dll) where syscall-stub
+    # patterns are by-design, not malware indicators.
+    excluded_modules = nc.get("module_name_any") or ()
+    if excluded_modules:
+        mn_low = (module_name or "").lower()
+        for m in excluded_modules:
+            if mn_low == m.lower():
+                return False
+    # `module_name_prefix_any` — case-insensitive prefix match. Useful
+    # when a family of modules (e.g. wow64*) all share the same
+    # by-design property.
+    excluded_module_prefixes = nc.get("module_name_prefix_any") or ()
+    if excluded_module_prefixes:
+        mn_low = (module_name or "").lower()
+        for p in excluded_module_prefixes:
+            if mn_low.startswith(p.lower()):
+                return False
     excluded_section = nc.get("section_name")
     if excluded_section and section_name == excluded_section:
         return False

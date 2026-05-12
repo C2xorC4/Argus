@@ -22,11 +22,13 @@ SSN-extracts-from-NTDLL recogniser).
 
 from __future__ import annotations
 
+import os
+
 from ._base import (
     BytePattern, ConstantPattern, ImportPattern, Pattern,
     StringPattern, StructuralPattern,
     emit_finding, find_byte_pattern, function_at, imports_in,
-    section_at, strings_in,
+    passes_negative_context, section_at, strings_in,
 )
 from ..output.finding import Severity
 
@@ -47,6 +49,20 @@ NTDLL_STUB_PREFIX = bytes.fromhex("4C8BD1B8")          # mov r10, rcx; mov eax, 
 NTDLL_STUB_TAIL   = bytes.fromhex("0F05C3")            # syscall; ret
 
 
+# By-design syscall-thunk DLLs. The NTDLL stub byte pattern appears
+# in these as part of normal architecture, not as a malware indicator.
+#   wow64.dll        — WoW64 manager (32->64 syscall transition)
+#   wow64cpu.dll     — WoW64 CPU-mode switching thunks
+#   wow64win.dll     — Win32k user-mode service thunks for WoW64
+#   wow64con.dll     — console subsystem thunks for WoW64
+#   xtajit.dll /     — ARM-on-x64 translation thunks
+#   xtajit64.dll
+SYSCALL_THUNK_DLLS = (
+    "ntdll.dll",
+    "wow64.dll", "wow64cpu.dll", "wow64win.dll", "wow64con.dll",
+    "xtajit.dll", "xtajit64.dll",
+)
+
 HELLS_GATE_STUB = BytePattern(
     name="syscalls.hells_gate_stub",
     description="NTDLL syscall-stub prologue bytes (`mov r10, rcx; mov eax, imm32; syscall; ret`) outside the NTDLL image — direct-syscall stub",
@@ -56,7 +72,7 @@ HELLS_GATE_STUB = BytePattern(
     mitre_attack=["T1106", "T1027"],
     knowledge_refs=["[[Memory/Knowledge/em_direct_syscall_ssn_resolution]]"],
     byte_sequences=[NTDLL_STUB_PREFIX],
-    negative_context={"module_name": "ntdll.dll"},   # legitimate inside NTDLL
+    negative_context={"module_name_any": SYSCALL_THUNK_DLLS},
 )
 
 NTDLL_STUB_TAIL_PATTERN = BytePattern(
@@ -66,7 +82,7 @@ NTDLL_STUB_TAIL_PATTERN = BytePattern(
     category="syscall_instruction",
     knowledge_refs=["[[Memory/Knowledge/em_direct_syscall_ssn_resolution]]"],
     byte_sequences=[NTDLL_STUB_TAIL],
-    negative_context={"module_name": "ntdll.dll"},
+    negative_context={"module_name_any": SYSCALL_THUNK_DLLS},
 )
 
 
@@ -231,20 +247,23 @@ def match(bv, *, binary: str, arch: str, platform: str,
     """Emit findings for direct-syscall and SSN-resolution patterns."""
     findings = []
 
-    # 1. Stub bytes — Hell's Gate prologue outside ntdll.
-    for addr in find_byte_pattern(bv, NTDLL_STUB_PREFIX):
-        sec = section_at(bv, addr) or ""
-        if "ntdll" in sec.lower():
-            continue
-        func = function_at(bv, addr)
-        fname = getattr(func, "name", "") if func else ""
-        findings.append(emit_finding(
-            HELLS_GATE_STUB,
-            address=addr, function=fname,
-            binary=binary, arch=arch, platform=platform,
-            detector=detector,
-            description_extra=f"section: {sec}",
-        ))
+    # 1. Stub bytes — Hell's Gate prologue. By-design thunk DLLs
+    # (ntdll.dll itself, the WoW64 thunk family, xtajit*) are gated
+    # at the binary level via `passes_negative_context` so we don't
+    # emit thousands of TP-by-design findings on them.
+    binary_basename = os.path.basename(binary or "")
+    if passes_negative_context(HELLS_GATE_STUB, module_name=binary_basename):
+        for addr in find_byte_pattern(bv, NTDLL_STUB_PREFIX):
+            sec = section_at(bv, addr) or ""
+            func = function_at(bv, addr)
+            fname = getattr(func, "name", "") if func else ""
+            findings.append(emit_finding(
+                HELLS_GATE_STUB,
+                address=addr, function=fname,
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                description_extra=f"section: {sec}",
+            ))
 
     # 2. NT* function strings.
     string_table = strings_in(bv)
