@@ -151,10 +151,15 @@ def _use_is_real_deref(use) -> bool:
 
     Excludes:
     - Phi nodes (SSA-bookkeeping at merge points; not dereferences)
-    - Pure SetVar aliases (copy from one SSA var to another;
-      aliasing-aware analysis is a Tier-2++ enhancement, but as a
-      basic filter we accept SetVar uses since they often precede a
-      real deref further down the chain)
+    - Return / Ret / TailCall — when a function returns the freed
+      pointer, that IS technically "use after free" but it's the
+      MSVC C++ ABI for the scalar-deleting destructor
+      (`??_E*` mangled functions): `delete this; return this;`.
+      The caller is contractually responsible for not touching the
+      returned pointer, so emitting a UAF here is FP noise.
+      (Empirically: combase.dll produced 660 UAF findings, all in
+      this shape, with free-to-use deltas of exactly 19 or 32 bytes
+      — function epilogue territory.)
 
     Includes:
     - Load / Store (direct dereference)
@@ -165,6 +170,11 @@ def _use_is_real_deref(use) -> bool:
         return False
     op_name = type(use).__name__
     if "VarPhi" in op_name or "MemPhi" in op_name:
+        return False
+    # Return-value uses: the function returns the freed pointer.
+    # Matches MSVC `Ret`, `TailCall`, `Jump`-to-thunk patterns plus
+    # the generic IL `Return` instruction.
+    if "Ret" in op_name or "TailCall" in op_name:
         return False
     return True
 
@@ -401,8 +411,29 @@ def find_global_pointer_uaf(bv, *, binary: str, arch: str, platform: str,
         return findings
 
     # Step 2: scan each function for loads of those globals used
-    # as pointers
+    # as pointers. Aggregate emissions per (global, free_site) pair —
+    # a single freed global loaded from N other functions is ONE
+    # binary-level fact ("this global is freed and re-loaded"), not
+    # N separate UAFs. Empirically, smart-pointer Release patterns
+    # (?InternalRelease, ?Release, ??_E*) free a singleton's value
+    # that's then loaded from hundreds of methods; each load is
+    # protected by the singleton's own re-init guard, not a true UAF.
+    # Aggregated emission keeps the signal while collapsing the volume.
+    aggregated: dict[tuple[int, int], dict] = {}     # (global_addr, free_addr) -> dict
     seen_findings: set[tuple[int, int]] = set()      # (global_addr, function_key)
+
+    # Smart-pointer Release patterns that almost always free a
+    # singleton/cache slot, never a UAF in the caller. These are
+    # binary-scope `freeing functions`; if the only free site for a
+    # global is in one of these, the global_pointer_uaf detector is
+    # likely producing pattern-noise. We still emit ONE aggregated
+    # finding so the operator can see the binary-level fact, just
+    # not 645 of them.
+    SMART_PTR_RELEASE_PREFIXES = (
+        "?InternalRelease", "?Release", "??_E", "??_G", "??1",
+        "?ResetMember", "?Detach", "?Cleanup",
+    )
+
     for func in bv.functions:
         fname = ilh.function_display_name(func)
         if _is_crt_internal(fname) or _is_raii_heap_wrapper(fname):
@@ -464,25 +495,59 @@ def find_global_pointer_uaf(bv, *, binary: str, arch: str, platform: str,
                 continue
             seen_findings.add(sig)
             first_free = free_sites[0]
-            findings.append(_emit(
-                "use_after_free",
-                addr=inst_addr, function=fname, binary=binary,
-                arch=arch, platform=platform, detector=detector,
-                description=(
-                    f"global pointer at 0x{global_addr:x} freed at "
-                    f"0x{first_free[0]:x} in {ilh.function_display_name(first_free[1])} "
-                    f"is reloaded at 0x{inst_addr:x} in {fname} — global is not "
-                    f"nulled after free, dangling pointer reachable from this load"
-                ),
-                details={
-                    "global_addr": hex(global_addr),
-                    "free_addr": hex(first_free[0]),
-                    "free_function": ilh.function_display_name(first_free[1]),
-                    "use_addr": hex(inst_addr),
-                    "use_function": fname,
-                    "pattern": "global_pointer_uaf",
-                },
-            ))
+            agg_key = (global_addr, first_free[0])
+            entry = aggregated.setdefault(agg_key, {
+                "global_addr": global_addr,
+                "free_addr": first_free[0],
+                "free_function": ilh.function_display_name(first_free[1]),
+                "use_sites": [],
+            })
+            entry["use_sites"].append({
+                "address": hex(inst_addr),
+                "function": fname,
+            })
+
+    # Emit one finding per (global, free_site) pair.
+    for (global_addr, free_addr), entry in aggregated.items():
+        free_fn_name = entry["free_function"]
+        # Detect smart-pointer-Release-style freers; severity goes
+        # MEDIUM instead of HIGH because these are almost never real
+        # UAFs (they're singleton/cache re-init patterns).
+        is_smart_release = any(
+            free_fn_name.startswith(p) for p in SMART_PTR_RELEASE_PREFIXES
+        )
+        use_count = len(entry["use_sites"])
+        # Anchor at the first use site for address localisation.
+        anchor = entry["use_sites"][0]
+        try:
+            anchor_addr = int(anchor["address"], 16)
+        except Exception:
+            anchor_addr = 0
+        findings.append(_emit(
+            "use_after_free",
+            addr=anchor_addr,
+            function=anchor["function"],
+            binary=binary, arch=arch, platform=platform, detector=detector,
+            description=(
+                f"global pointer at 0x{global_addr:x} freed at "
+                f"0x{free_addr:x} in {free_fn_name} is loaded from "
+                f"{use_count} other function(s)"
+                + (" — freer matches smart-pointer Release shape "
+                   "(singleton re-init likely, not exploitable UAF)"
+                   if is_smart_release else
+                   " — global is not nulled after free, dangling "
+                   "pointer reachable from these loads")
+            ),
+            details={
+                "global_addr": hex(global_addr),
+                "free_addr": hex(free_addr),
+                "free_function": free_fn_name,
+                "use_site_count": use_count,
+                "use_sites_sample": entry["use_sites"][:8],
+                "pattern": "global_pointer_uaf",
+                "smart_pointer_release_pattern": is_smart_release,
+            },
+        ))
     return findings
 
 
@@ -625,16 +690,40 @@ def find_uaf_and_double_free(bv, *, binary: str, arch: str, platform: str,
             continue
 
         # UAF: a use of the same SSA var that comes AFTER a free is a
-        # use-after-free candidate. Three filters:
+        # use-after-free candidate. Four filters:
         #
         # 1. Temporal: use_addr > earliest_free (program order; CFG
         #    post-dominance is a Tier-2++ enhancement).
         # 2. Real-deref: skip phi/mem-phi uses — these are SSA
         #    bookkeeping at merge points, not actual dereferences.
         # 3. Free-site: skip the free call itself (which is also a use).
+        # 4. Function-epilogue: skip uses within ~64 bytes of the free
+        #    AND located in the function's tail third. Empirically
+        #    these are register-shuffle / return-value-pass-through
+        #    instructions (`mov rax, rcx; ret` after `delete this`).
+        #    This is the MSVC C++ ABI for the deleting-destructor
+        #    family (??_E*, ??_G*) and for any cleanup method that
+        #    frees and then returns. The "use" the detector sees is
+        #    the epilogue moving the now-freed pointer to the return
+        #    register; the caller's contract is that they don't
+        #    dereference the returned value.
         free_addrs = {a for a, _ in sites}
         earliest_free = min(free_addrs)
         all_uses = ilh.ssa_uses_of(func, ssa_var)
+        # Function bounds for the epilogue filter.
+        try:
+            sf = getattr(func, "source_function", None) or func
+            fn_start = int(getattr(sf, "start", 0) or 0)
+            # Use the highest basic-block end as the function end —
+            # cheap approximation.
+            fn_end = max(
+                (int(getattr(b, "end", 0) or 0)
+                 for b in (getattr(sf, "basic_blocks", []) or [])),
+                default=fn_start
+            )
+        except Exception:
+            fn_start, fn_end = 0, 0
+        fn_size = max(0, fn_end - fn_start)
         for use in all_uses:
             use_addr = int(getattr(use, "address", 0))
             if use_addr in free_addrs:
@@ -645,6 +734,12 @@ def find_uaf_and_double_free(bv, *, binary: str, arch: str, platform: str,
                 continue
             if not _use_is_real_deref(use):
                 continue
+            # Epilogue gate: very close to free AND in the tail third
+            # of the function.
+            if fn_size > 0 and (use_addr - earliest_free) <= 64:
+                position_in_fn = use_addr - fn_start
+                if position_in_fn >= int(fn_size * 0.66):
+                    continue
             findings.append(_emit(
                 "use_after_free",
                 addr=use_addr, function=func_name, binary=binary,
