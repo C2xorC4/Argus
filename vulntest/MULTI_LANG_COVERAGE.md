@@ -29,13 +29,22 @@ rest of the multi-language matrix.
 
 | Class                    | C# / .NET | Go        | Rust          |
 |--------------------------|-----------|-----------|---------------|
-| deserialization          | ✅ v1 string co-presence | ✅ v1 | ✅ v1 |
-| stack-overflow           | ❌        | ❌        | ❌            |
-| type-confusion           | ❌        | ❌        | ❌            |
-| use-after-free           | partial (`ObjectDisposedException` co-presence) | ❌ | ❌ |
+| deserialization          | ✅ v1 string | ✅ v1 string | ✅ v1 string |
+| stack-overflow           | ✅ v2 IL (`localloc` opcode + `UnverifiableCodeAttribute`) | ❌ (fixture-build gap; cgo needs mingw) | ❌ (needs PDB) |
+| type-confusion           | ✅ v2 IL (`Marshal::PtrToStructure` direct, or `IntPtr + Marshal::SizeOf + unverifiable` structural) | partial (`unsafe.Pointer` → `type_confusion_candidate`) | ❌ (needs PDB) |
+| use-after-free           | ✅ v2 IL (`ObjectDisposedException` TypeRef + dispose-then-other-method MemberRef shape) | partial (`unsafe.Pointer` overlaps typeconf) | ❌ (needs PDB) |
 
 ✅ = detector emits the expected category from `expected.json`.
 ❌ = no detector fires; cell is currently FN.
+
+C# / .NET full precision delivered via `dotnet_il.py` (uses `dnfile`
+to walk CLI metadata + IL byte streams). v2 closes all three C#
+gaps. Production-grade hits already observed on real System32 .NET
+DLLs:
+- `Microsoft.Windows.Storage.StorageBusCache.dll` →
+  `type_confusion(high)` via `Marshal::PtrToStructure` MemberRef
+- `fhuxcommon.dll` → `stack_buffer_overflow(high)` via 25 methods
+  with `localloc` + UnverifiableCodeAttribute
 
 ## Why most cells are FN — string probe results
 
