@@ -349,56 +349,64 @@ def find_type_confusion_candidates(bv, *, binary: str, arch: str, platform: str,
     # wire `vtable_dispatch_after_unguarded_downcast` correctly.
     findings.append(finding)
 
-    # Per-call-site `type_confusion` HIGH emissions. In a binary
-    # that uses C++ classes and makes vtable-indirect calls but
-    # imports no RTTI helpers, EACH such site is a potential type-
-    # confusion sink — the operator can't tell if the pointer
-    # being dispatched has been downcast safely. v2 will refine by
-    # checking whether the dispatch target is reached via a
-    # function-parameter pointer (the classic "downcast a Shape*
-    # to a Circle* then call ->area()" shape).
+    # Aggregated `type_confusion` HIGH emission — ONE finding per
+    # binary, not per call site. The signal is binary-level: "this
+    # binary has N unverified virtual-dispatch sites." Previous
+    # per-callsite emission generated 7,000+ findings on large C++
+    # binaries (e.g. SecTimeSync.exe), drowning every other detector
+    # in the rollup view. The per-site list is preserved in
+    # `details.representative_sites` for audit pivoting.
+    #
+    # Per-site v2 (when it lands) will gate on
+    # function-parameter-pointer dispatch (the "downcast a Shape* to
+    # a Circle* then call ->area()" shape) and can emit per-site at
+    # HIGH severity again because each site will then carry a
+    # specific anchoring signal.
     type_meta = CATEGORY_META["type_confusion"]
-    seen_site_keys: set[tuple[str, int]] = set()
-    for site_addr, site_func in sites:
-        key = (site_func, site_addr)
-        if key in seen_site_keys:
-            continue
-        seen_site_keys.add(key)
-        findings.append(Finding(
-            id="",
-            category="type_confusion",
-            severity=type_meta["severity"],
-            address=int(site_addr),
-            function=site_func,
-            binary=binary, arch=arch, platform=platform,
-            detector=detector,
-            knowledge_refs=list(type_meta["knowledge_refs"]),
-            cwe=list(type_meta["cwe"]),
-            mitre_attack=list(type_meta["mitre"]),
-            description=(
-                f"{site_func}: vtable-indirect call at 0x{site_addr:x} "
-                f"in a binary that imports no RTTI helpers — the "
-                f"pointer being dispatched may have been downcast "
-                f"via unguarded `static_cast` from a different "
-                f"runtime type. Canonical type-confusion sink: "
-                f"calling a method through a virtual-dispatch slot "
-                f"that's actually the wrong type's vtable."
-            ),
-            evidence=[Evidence(
-                kind="vtable_dispatch_without_rtti",
-                source=detector,
-                payload=(f"site_addr=0x{site_addr:x} "
-                         f"rtti_imports=none "
-                         f"binary_indirect_calls={indirect_count}"),
-                address=int(site_addr),
-                function=site_func,
-            )],
-            details={
-                "site_addr": hex(int(site_addr)),
-                "rtti_imports_present": False,
-                "binary_indirect_call_count": indirect_count,
-            },
-        ))
+    # Deduplicate sites and keep the first ~25 as a representative
+    # sample for the operator. Sorting by function-then-address keeps
+    # the sample stable across runs.
+    unique_sites = sorted({(fn, addr) for addr, fn in sites})
+    sample = unique_sites[:25]
+    findings.append(Finding(
+        id="",
+        category="type_confusion",
+        severity=type_meta["severity"],
+        address=int(first_addr),
+        function=first_func,
+        binary=binary, arch=arch, platform=platform,
+        detector=detector,
+        knowledge_refs=list(type_meta["knowledge_refs"]),
+        cwe=list(type_meta["cwe"]),
+        mitre_attack=list(type_meta["mitre"]),
+        description=(
+            f"Binary has {indirect_count} vtable-indirect call site(s) "
+            f"across {len(unique_sites)} unique (function, address) "
+            f"pairs and imports no RTTI helpers. EVERY downcast in this "
+            f"binary is unverified at runtime — necessary (not "
+            f"sufficient) condition for type-confusion exploitation. "
+            f"Sample sites in `details.representative_sites`; full "
+            f"set inspectable via callgraph walk."
+        ),
+        evidence=[Evidence(
+            kind="vtable_dispatch_without_rtti",
+            source=detector,
+            payload=(f"indirect_calls={indirect_count} "
+                     f"unique_sites={len(unique_sites)} "
+                     f"rtti_imports=none"),
+            address=int(first_addr),
+            function=first_func,
+        )],
+        details={
+            "indirect_call_count": indirect_count,
+            "unique_site_count": len(unique_sites),
+            "rtti_imports_present": False,
+            "representative_sites": [
+                {"function": fn, "address": hex(addr)}
+                for fn, addr in sample
+            ],
+        },
+    ))
     return findings
 
 
