@@ -56,6 +56,50 @@ CATEGORY_META = {
             "[[Memory/Knowledge/argus_detector_design_principles]]",
         ],
     },
+    "use_after_free": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-416"],
+        "mitre": ["T1203"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/wnapi_heap_internals]]",
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+        ],
+    },
+    "type_confusion": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-843"],
+        "mitre": ["T1203"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/ec_undefined_behavior_taxonomy]]",
+            "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]",
+        ],
+    },
+    "type_confusion_candidate": {
+        "severity": Severity.INFO,
+        "cwe": ["CWE-843"],
+        "mitre": ["T1203"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/ec_undefined_behavior_taxonomy]]",
+            "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]",
+        ],
+    },
+    "stack_buffer_overflow": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-121"],
+        "mitre": ["T1203"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/hw_stack_overflow_mechanics]]",
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+        ],
+    },
+    "rust_runtime_present": {
+        "severity": Severity.INFO,
+        "cwe": [],
+        "mitre": [],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+        ],
+    },
 }
 
 
@@ -98,6 +142,33 @@ _MANAGED_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("managed_dangerous_api",
      ("Marshal.GetDelegateForFunctionPointer",),
      "Marshal.GetDelegateForFunctionPointer — native-to-managed cast primitive"),
+
+    # Use-after-Dispose analog (C# / .NET). Pure managed code doesn't
+    # UAF in the C sense (GC), but `IDisposable.Dispose()` releases
+    # unmanaged resources; subsequent method calls on the disposed
+    # object operate on freed unmanaged state. `ObjectDisposedException`
+    # in the metadata is a strong indicator — the binary either calls
+    # APIs that throw ODE or implements IDisposable and references the
+    # exception type itself. CWE-416 (analog).
+    ("use_after_free",
+     ("ObjectDisposedException",),
+     "ObjectDisposedException reference in managed assembly — "
+     "use-after-Dispose analog; subsequent method call on a disposed "
+     "object operates on freed unmanaged state"),
+
+    # Managed type-confusion shapes (Rust transmute / C# Unsafe.As /
+    # Marshal.PtrToStructure). Strings co-presence is the v1 signal;
+    # v2 (CLI metadata MemberRef walk) gates precisely.
+    ("type_confusion",
+     ("Marshal", "PtrToStructure"),
+     "Marshal.PtrToStructure reference — reinterprets raw bytes as a "
+     "managed struct without validating layout (C# unsafe-pointer "
+     "type-confusion shape)"),
+    ("type_confusion",
+     ("System.Runtime.CompilerServices.Unsafe", "As"),
+     "System.Runtime.CompilerServices.Unsafe.As reference — managed "
+     "type-pun primitive (compiles to direct bit-reinterpret across "
+     "T1 and T2)"),
 )
 
 
@@ -203,6 +274,49 @@ _GO_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("insecure_deserialization",
      ("encoding/json", "*json.Decoder", "json.NewDecoder"),
      "json.Decoder.Decode with interface{} target — type-narrowing gadget class"),
+
+    # cgo-boundary stack-overflow shape. Pure Go can't classical-stack-
+    # overflow (runtime guards every slice access), but a cgo
+    # boundary delegates to C — where the C side can do whatever the
+    # author wrote, including `strcpy(buf, attacker_input)`. The
+    # binary having BOTH `_cgo_runtime_cgocall` (cgo entry-point
+    # bridge) AND `strcpy` (libc function pulled in by the cgo C
+    # blob) is a strong indicator of a cgo-bridged C blob with
+    # classical bounds-free string operations.
+    ("stack_buffer_overflow",
+     ("_cgo_runtime_cgocall", "strcpy"),
+     "Go binary with cgo bridge + strcpy reference — C blob crossed "
+     "via cgo can stack-overflow with the same C-side bounds-free "
+     "semantics (CWE-121, cgo-bridged)"),
+
+    # Unsafe.Pointer-based reinterpret. Go binaries that import
+    # `unsafe` have a runtime-visible string for it. The runtime
+    # version detector already requires Go origin; an `unsafe.Pointer`
+    # marker plus user-package functions (main.*) is a research-
+    # candidate signal — could be type-confusion OR a UAF analog
+    # OR a legitimate optimisation pattern. Emit as candidate /
+    # INFO-grade until gopclntab walk or MLIL inspection gates it.
+    ("type_confusion_candidate",
+     ("unsafe.Pointer", "main."),
+     "Go binary references unsafe.Pointer in main package — research "
+     "candidate; the unsafe.Pointer escape valve can produce both "
+     "type-confusion (cross-struct reinterpret) and UAF (raw pointer "
+     "into a slice whose backing array gets reallocated). v2 "
+     "gopclntab walk required to classify per call site."),
+)
+
+
+# Rust-rules extension. The release-build string table is identical
+# across stack-OF / type-confusion / UAF cells, so per-category
+# precision from strings alone is impossible. Emit an info-grade
+# `language_origin` finding so the rollup can identify the binary's
+# language without making per-bug claims. PDB / DWARF v2 will refine.
+_RUST_INFO_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("rust_runtime_present",
+     ("panicked at", "rust_panic"),
+     "Rust-compiled binary (release-build stdlib panic machinery "
+     "present). Per-category classification requires PDB / DWARF "
+     "walk; release builds strip user-code symbols."),
 )
 
 
@@ -227,6 +341,7 @@ def find_dotnet_managed_findings(
         rules.extend(_GO_RULES)
     if is_rust:
         rules.extend(_RUST_RULES)
+        rules.extend(_RUST_INFO_RULES)
 
     seen_categories: set[str] = set()
     for category, needles, description in rules:
