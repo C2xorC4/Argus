@@ -1,0 +1,565 @@
+"""RPC interface enumeration — find dispatch tables, list methods.
+
+For a Windows binary that hosts a native RPC server (registers an
+interface via `RpcServerRegisterIf*`), this module locates the
+interface's `RPC_SERVER_INTERFACE` structure from a known UUID
+anchor, walks its dispatch table, and emits findings naming each
+method handler. When combined with a known-vulnerable helper
+(e.g., the `MpIsPathSymlink` TOCTOU in Defender's MpSvc.dll), it
+identifies WHICH method procnums reach the vulnerable code path —
+producing the missing piece for chain-PoC construction.
+
+v1 scope:
+  - Input: a UUID (binary GUID bytes or canonical string) + an
+           optional "vulnerable-function-name" anchor
+  - Search the loaded BV for the binary UUID
+  - From each match, identify the `RPC_SERVER_INTERFACE` struct
+    (UUID lives at offset +4 of the struct on x64 PE)
+  - Read the DispatchTable pointer, then DispatchTableCount and
+    the dispatch entries (count at +0, fn-pointer-array pointer
+    at +8)
+  - For each dispatch entry: emit a dispatch finding listing
+    method index + handler function address. Optionally walk
+    forward callgraph to an anchor function.
+  - Cheap string-hint signal: scan each handler for path-related
+    string literals.
+
+Output:
+  - One `rpc_interface_dispatch` finding per (interface, method)
+    pair, listing method index + handler function address
+  - One `remote_callable_vuln_method` finding per method that
+    reaches the anchor — the method procnum a PoC should call
+
+Honest limitations of v1
+------------------------
+
+Static callgraph reachability from a dispatch handler to a
+helper is brittle on MIDL-generated RPC code: the handlers are
+NDR-marshal stubs that call the real implementation via an
+indirect call. Binja's callees relation doesn't model the
+indirect call without dataflow resolution.
+
+Empirically on MpSvc.dll: the walker enumerates all 237
+IMpService methods cleanly, but the callgraph link from any
+dispatch entry to `MpIsPathSymlink` is invisible to Binja —
+the helper has only one direct caller (a CommonUtil function)
+and the dispatch handlers reach it through ≥6 layers of
+indirect calls.
+
+The string-hint signal (path-touching tokens in handler-
+referenced strings) doesn't fire at the dispatch-entry level
+either, because handlers reference no user-visible strings —
+the strings live in the real implementation behind the
+indirect call.
+
+This means **v1 surfaces the interface scaffolding (UUID,
+method count, dispatch addresses) but not the per-method
+intent.** Identifying which specific procnum to call for a
+BlueHammer-class attack requires either:
+  (a) A real NDR format-string parser that recovers argument
+      types (path methods take `wchar_t *` — methods to call
+      take string args; that's a strong static signal)
+  (b) Indirect-call resolution via dataflow (MLIL constant
+      propagation across the marshal stub)
+  (c) Operator inspection of the decompiled dispatch handlers
+
+(a) is the v2 work and is the "right" answer. ~300+ LOC of
+NDR format-string walking. v1 ships the skeleton; v2 fills in
+per-method semantics.
+
+This is `compose`-class output: it composes a `permissive_sddl`
+signal, a `toctou` signal, and the dispatch enumeration into
+a single PoC-anchor finding. It's the foundation for the
+Phase 3 v2 chain-PoC generator.
+
+Reference structures (NDR / NDR64):
+
+  RPC_SERVER_INTERFACE {
+      ULONG  Length;                     // 0x0
+      RPC_SYNTAX_IDENTIFIER InterfaceId; // 0x4: GUID + 2x u16 version
+      RPC_SYNTAX_IDENTIFIER TransferSyntax; // 0x18
+      PRPC_DISPATCH_TABLE DispatchTable; // 0x2c (x86) / 0x30 (x64 aligned)
+      ULONG  RpcProtseqEndpointCount;
+      ...
+  }
+
+  RPC_DISPATCH_TABLE {
+      ULONG DispatchTableCount;
+      RPC_DISPATCH_FUNCTION DispatchTable[]; // array of fnptrs
+      LONG_PTR Reserved;
+  }
+
+x64 PE layout (which Defender platform uses): UUID at offset 4,
+TransferSyntax at offset 24, DispatchTable pointer at offset 56.
+Confirmed empirically; varies between MIDL output flavours so the
+walker is defensive.
+
+Knowledge anchor:
+- `[[Memory/Knowledge/windows_defender_attack_surface]]` — once
+  buffered. The IMpService interface UUID, the MpIsPathSymlink
+  TOCTOU shape, and the cross-module replication are documented
+  there.
+"""
+from __future__ import annotations
+
+import struct
+from collections import deque
+from typing import Optional
+
+from ..output.finding import Evidence, Finding, Severity
+
+
+CATEGORY_META = {
+    "rpc_interface_dispatch": {
+        "severity": Severity.INFO,
+        "cwe": [],
+        "mitre": [],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+        ],
+    },
+    "remote_callable_vuln_method": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-367"],
+        "mitre": ["T1068"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+        ],
+    },
+}
+
+
+def _uuid_str_to_binary(uuid_str: str) -> bytes:
+    """Convert canonical GUID string to Windows binary form
+    (Data1 LE u32, Data2 LE u16, Data3 LE u16, Data4 8 bytes BE).
+    """
+    parts = uuid_str.replace("{", "").replace("}", "").split("-")
+    if len(parts) != 5:
+        raise ValueError(f"bad uuid: {uuid_str!r}")
+    d1 = bytes.fromhex(parts[0])[::-1]
+    d2 = bytes.fromhex(parts[1])[::-1]
+    d3 = bytes.fromhex(parts[2])[::-1]
+    d4 = bytes.fromhex(parts[3]) + bytes.fromhex(parts[4])
+    return d1 + d2 + d3 + d4
+
+
+def _find_binary_occurrences(bv, needle: bytes) -> list[int]:
+    """Return all addresses where `needle` appears in bv's data.
+    Uses Binja's `find_next_data` walker.
+    """
+    out = []
+    if bv is None or not needle:
+        return out
+    start = bv.start
+    end = bv.end
+    # Cap iterations defensively
+    max_hits = 64
+    cur = start
+    while cur < end and len(out) < max_hits:
+        try:
+            hit = bv.find_next_data(cur, needle)
+        except Exception:
+            break
+        if hit is None:
+            break
+        if isinstance(hit, tuple):
+            hit_addr = hit[0]
+        else:
+            hit_addr = hit
+        if hit_addr is None or hit_addr < cur:
+            break
+        out.append(int(hit_addr))
+        cur = hit_addr + 1
+    return out
+
+
+def _read_qword(bv, addr: int) -> Optional[int]:
+    try:
+        b = bv.read(addr, 8)
+        if len(b) != 8:
+            return None
+        return struct.unpack("<Q", b)[0]
+    except Exception:
+        return None
+
+
+def _read_dword(bv, addr: int) -> Optional[int]:
+    try:
+        b = bv.read(addr, 4)
+        if len(b) != 4:
+            return None
+        return struct.unpack("<I", b)[0]
+    except Exception:
+        return None
+
+
+# Candidate offsets where the DispatchTable pointer sits in the
+# RPC_SERVER_INTERFACE structure on x64 PE. Probed in order;
+# whichever points to a plausible dispatch-table candidate wins.
+_DISPATCH_PTR_CANDIDATE_OFFSETS = (0x30, 0x38, 0x28, 0x40, 0x48)
+
+
+def _read_dispatch_table(bv, dispatch_ptr: int) -> list[int]:
+    """Given a candidate RPC_DISPATCH_TABLE pointer, return the
+    list of dispatch-function pointers if it's plausibly a
+    dispatch table, else empty list.
+
+    Layout (x64 RPC_DISPATCH_TABLE):
+      +0x00  DispatchTableCount    UINT
+      +0x04  (padding)
+      +0x08  DispatchTable         PRPC_DISPATCH_FUNCTION
+                                   (pointer to fn-pointer array)
+      +0x10  Reserved              LONG_PTR
+    """
+    if dispatch_ptr is None or dispatch_ptr <= 0:
+        return []
+    count = _read_dword(bv, dispatch_ptr)
+    if count is None or count < 1 or count > 1024:
+        # Plausible range: 1-1024 RPC methods per interface
+        # (Defender's IMpService has 237; some big interfaces go higher)
+        return []
+    # The fn-pointer array is at *(dispatch_ptr + 8), NOT at
+    # dispatch_ptr + 8. It's a pointer to a separately allocated array.
+    fn_array_ptr = _read_qword(bv, dispatch_ptr + 8)
+    if fn_array_ptr is None or fn_array_ptr == 0:
+        return []
+    if fn_array_ptr < bv.start or fn_array_ptr >= bv.end:
+        return []
+    entries: list[int] = []
+    for i in range(count):
+        ptr = _read_qword(bv, fn_array_ptr + i * 8)
+        if ptr is None or ptr == 0:
+            entries.append(0)
+            continue
+        # Sanity check: pointer should be inside the binary
+        if ptr < bv.start or ptr >= bv.end:
+            return []
+        entries.append(ptr)
+    # Confirm at least half the entries are non-null AND resolve
+    # to functions (handler addresses must land in code).
+    nonzero = [p for p in entries if p != 0]
+    if len(nonzero) < max(1, count // 2):
+        return []
+    fn_resolved = sum(
+        1 for p in nonzero
+        if any(bv.get_functions_containing(p) or [])
+    )
+    if fn_resolved < max(1, len(nonzero) // 2):
+        return []
+    return entries
+
+
+def _function_containing(bv, addr: int):
+    if bv is None or addr is None:
+        return None
+    try:
+        fs = list(bv.get_functions_containing(int(addr)) or [])
+    except Exception:
+        return None
+    return fs[0] if fs else None
+
+
+def _reaches(start_fn, target_fn, *, max_depth: int = 16) -> int:
+    """BFS forward callgraph reachability. Returns hops if target
+    reachable from start, else -1."""
+    if start_fn is None or target_fn is None:
+        return -1
+    target_start = int(getattr(target_fn, "start", 0) or 0)
+    if int(getattr(start_fn, "start", 0) or 0) == target_start:
+        return 0
+    seen = {int(getattr(start_fn, "start", 0) or 0)}
+    frontier = deque([(start_fn, 0)])
+    while frontier:
+        fn, depth = frontier.popleft()
+        if depth >= max_depth:
+            continue
+        try:
+            callees = list(getattr(fn, "callees", None) or [])
+        except Exception:
+            continue
+        for c in callees:
+            c_addr = int(getattr(c, "start", 0) or 0)
+            if c_addr in seen:
+                continue
+            seen.add(c_addr)
+            if c_addr == target_start:
+                return depth + 1
+            frontier.append((c, depth + 1))
+    return -1
+
+
+def _find_function_by_name_substring(bv, needle: str):
+    """Return the first Function whose name contains `needle`."""
+    for fn in (bv.functions or []):
+        name = getattr(fn, "name", "") or ""
+        if needle in name:
+            return fn
+    return None
+
+
+# Substrings whose presence in a dispatch handler's referenced
+# strings suggests the method touches filesystem paths — i.e. is a
+# candidate BlueHammer-class attack-surface entry.
+_PATH_TOUCHING_HINTS = (
+    "path", "file", "definition", "update", "import", "scan",
+    "manifest", "signature", "cab", "vdm", "lkg", "shadow",
+    "VolumeShadow", "Reparse", "Symlink", "junction", "open",
+)
+
+
+def _string_refs_in_function(bv, fn) -> list[str]:
+    """Return the literal strings referenced by `fn` (via code
+    refs from any string in the binary). Filter to printable
+    ASCII / UTF-16 of length ≥ 4."""
+    out: list[str] = []
+    if bv is None or fn is None:
+        return out
+    fn_start = int(getattr(fn, "start", 0) or 0)
+    try:
+        # Walk the function's basic blocks; for each instruction,
+        # check its data refs (constants pointing into a string
+        # section).
+        for bb in (getattr(fn, "basic_blocks", []) or []):
+            for inst_addr in range(int(bb.start), int(bb.end)):
+                try:
+                    refs = list(
+                        bv.get_data_refs_from(inst_addr) or []
+                    )
+                except Exception:
+                    continue
+                for r in refs:
+                    try:
+                        sv = bv.get_ascii_string_at(int(r), min_length=4)
+                    except Exception:
+                        sv = None
+                    if sv is None:
+                        continue
+                    val = getattr(sv, "value", None)
+                    if val:
+                        out.append(val)
+    except Exception:
+        pass
+    return list(set(out))
+
+
+def find_rpc_interface_methods(
+        bv, *,
+        interface_uuid: str,
+        binary: str,
+        arch: str,
+        platform: str,
+        anchor_function_substring: Optional[str] = None,
+        detector: str = "analysis.rpc_interface",
+) -> list[Finding]:
+    """Locate the RPC interface table for `interface_uuid` and
+    enumerate its dispatch methods. If `anchor_function_substring`
+    is provided, also emit `remote_callable_vuln_method` findings
+    for any method that reaches the anchor in the forward callgraph.
+    """
+    findings: list[Finding] = []
+    if bv is None:
+        return findings
+
+    try:
+        needle = _uuid_str_to_binary(interface_uuid)
+    except ValueError:
+        return findings
+
+    occurrences = _find_binary_occurrences(bv, needle)
+    if not occurrences:
+        return findings
+
+    # For each UUID occurrence, try the candidate dispatch-pointer
+    # offsets. The first that yields a plausible dispatch table is
+    # the winner. Empirically, the UUID lives at offset +4 of an
+    # `RPC_SERVER_INTERFACE` struct (Length field is +0), so the
+    # struct base is `occurrence - 4`. The DispatchTable pointer is
+    # at struct_base + 0x30 (x64 aligned typical layout).
+    discovered: dict[int, list[int]] = {}  # interface_base -> [dispatch entries]
+    for occ in occurrences:
+        struct_base = occ - 4
+        for off in _DISPATCH_PTR_CANDIDATE_OFFSETS:
+            disp_ptr = _read_qword(bv, struct_base + off)
+            if disp_ptr is None or disp_ptr == 0:
+                continue
+            entries = _read_dispatch_table(bv, disp_ptr)
+            if entries:
+                discovered[struct_base] = entries
+                break
+
+    if not discovered:
+        return findings
+
+    # Resolve anchor function (the vulnerable helper) if requested.
+    anchor_fn = None
+    if anchor_function_substring:
+        anchor_fn = _find_function_by_name_substring(
+            bv, anchor_function_substring
+        )
+
+    # Emit per-method dispatch findings, plus reachability composites.
+    meta_disp = CATEGORY_META["rpc_interface_dispatch"]
+    meta_vuln = CATEGORY_META["remote_callable_vuln_method"]
+    for interface_base, entries in discovered.items():
+        for proc_idx, dispatch_addr in enumerate(entries):
+            if dispatch_addr == 0:
+                continue
+            handler_fn = _function_containing(bv, dispatch_addr)
+            handler_name = (
+                getattr(handler_fn, "name", "") or f"sub_{dispatch_addr:x}"
+            )
+            # String-reference signals: cheap hint that the
+            # dispatch handler touches filesystem paths (BlueHammer-
+            # class candidate).
+            handler_strings = _string_refs_in_function(bv, handler_fn) if handler_fn else []
+            path_hints = []
+            for s in handler_strings:
+                sl = s.lower()
+                for h in _PATH_TOUCHING_HINTS:
+                    if h.lower() in sl:
+                        path_hints.append((h, s[:80]))
+                        break  # one hit per string is enough
+            path_touching = bool(path_hints)
+            findings.append(Finding(
+                id="",
+                category="rpc_interface_dispatch",
+                severity=meta_disp["severity"],
+                address=int(dispatch_addr),
+                function=handler_name,
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                knowledge_refs=list(meta_disp["knowledge_refs"]),
+                cwe=list(meta_disp["cwe"]),
+                mitre_attack=list(meta_disp["mitre"]),
+                confidence=0.9 if not path_touching else 0.7,
+                description=(
+                    f"RPC interface {interface_uuid} method idx "
+                    f"{proc_idx}: dispatch handler {handler_name} at "
+                    f"0x{dispatch_addr:x} (interface table at "
+                    f"0x{interface_base:x})"
+                    + (f"; path-touching string hints: "
+                       f"{', '.join(h for h, _ in path_hints[:5])}"
+                       if path_touching else "")
+                ),
+                evidence=[Evidence(
+                    kind="rpc_dispatch_entry",
+                    source=detector,
+                    payload=(f"interface_uuid={interface_uuid} "
+                             f"proc_idx={proc_idx} "
+                             f"handler=0x{dispatch_addr:x} "
+                             f"interface_base=0x{interface_base:x}"),
+                    address=int(dispatch_addr),
+                    function=handler_name,
+                )],
+                details={
+                    "interface_uuid": interface_uuid,
+                    "proc_idx": proc_idx,
+                    "handler_addr": hex(int(dispatch_addr)),
+                    "interface_table_addr": hex(int(interface_base)),
+                    "path_touching_hints": [
+                        {"hint": h, "string": s}
+                        for h, s in path_hints[:8]
+                    ],
+                    "path_touching": path_touching,
+                },
+            ))
+
+            if anchor_fn is None or handler_fn is None:
+                continue
+            hops = _reaches(handler_fn, anchor_fn, max_depth=16)
+            if hops < 0:
+                continue
+            anchor_name = getattr(anchor_fn, "name", "<anchor>")
+            findings.append(Finding(
+                id="",
+                category="remote_callable_vuln_method",
+                severity=meta_vuln["severity"],
+                address=int(dispatch_addr),
+                function=handler_name,
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                knowledge_refs=list(meta_vuln["knowledge_refs"]),
+                cwe=list(meta_vuln["cwe"]),
+                mitre_attack=list(meta_vuln["mitre"]),
+                confidence=0.85,
+                description=(
+                    f"RPC method idx {proc_idx} of {interface_uuid} "
+                    f"({handler_name}) reaches the anchor "
+                    f"`{anchor_name}` in {hops} callee-hop(s). This "
+                    f"is the structural property a PoC can exploit: "
+                    f"invoking method procnum {proc_idx} via RPC "
+                    f"reaches the vulnerable code path."
+                ),
+                evidence=[Evidence(
+                    kind="rpc_method_to_anchor_reachability",
+                    source=detector,
+                    payload=(f"interface_uuid={interface_uuid} "
+                             f"proc_idx={proc_idx} "
+                             f"handler={handler_name} "
+                             f"anchor={anchor_name} "
+                             f"reachability_hops={hops}"),
+                    address=int(dispatch_addr),
+                    function=handler_name,
+                )],
+                details={
+                    "interface_uuid": interface_uuid,
+                    "proc_idx": proc_idx,
+                    "handler_function": handler_name,
+                    "handler_addr": hex(int(dispatch_addr)),
+                    "anchor_function": anchor_name,
+                    "reachability_hops": hops,
+                },
+            ))
+
+    return findings
+
+
+# Built-in known-interface anchors. Future: load from a curated
+# knowledge entry / config file. For now, ship Defender's
+# IMpService as the seed because it's the primary motivating case.
+_KNOWN_INTERFACES = (
+    {
+        "uuid": "c503f532-443a-4c69-8300-ccd1fbdb3839",
+        "name": "IMpService",
+        "binary_hint": "MpSvc",  # only walk on binaries whose name contains this
+        "anchor_function_substring": "MpIsPathSymlink",
+    },
+)
+
+
+def analyze(session, *, binary: Optional[str] = None,
+            arch: Optional[str] = None, platform: Optional[str] = None,
+            detector: str = "analysis.rpc_interface",
+            ) -> list[Finding]:
+    """Argus-standard entry. Walks known RPC interfaces if the
+    binary matches the interface's binary_hint. Output: findings
+    for dispatch enumeration + reachability composites."""
+    if session is None:
+        return []
+    bv = getattr(session, "bv", None)
+    if bv is None:
+        return []
+    binary = binary or getattr(session, "binary_path", "") or ""
+    arch = arch or (str(bv.arch) if bv.arch else "unknown")
+    platform = platform or (str(bv.platform) if bv.platform else "unknown")
+
+    bn = binary.lower()
+    out: list[Finding] = []
+    for known in _KNOWN_INTERFACES:
+        hint = known.get("binary_hint", "").lower()
+        if hint and hint not in bn:
+            continue
+        out.extend(find_rpc_interface_methods(
+            bv,
+            interface_uuid=known["uuid"],
+            binary=binary, arch=arch, platform=platform,
+            anchor_function_substring=known.get("anchor_function_substring"),
+            detector=detector,
+        ))
+    return out
+
+
+__all__ = [
+    "analyze", "find_rpc_interface_methods", "CATEGORY_META",
+    "_KNOWN_INTERFACES",
+]
