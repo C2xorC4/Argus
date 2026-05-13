@@ -67,6 +67,25 @@ BlueHammer-class attack requires either:
 NDR format-string walking. v1 ships the skeleton; v2 fills in
 per-method semantics.
 
+v2 scanner confirmed gap (2026-05-13, MpSvc.dll 4.18.26030.3011-0):
+  The FC_WSTRING (0x25) / FC_C_WSTRING (0x26) direct byte scan in
+  _ndr_proc_has_wstring_param MISSES PWSTR parameters encoded as
+  FC_RP (0x11) or FC_UP (0x12) followed by a type-format-string
+  offset pointing to FC_C_WSTRING. MIDL almost always uses this
+  pointer-chain encoding for [unique/ref, string] wchar_t* params.
+
+  Consequence: `ServerMpUpdateEngineSignature` (proc_idx=42, the
+  BlueHammer chain target) was NOT found by the v2 scan. The 5
+  hits found (37, 38, 125, 141, 208) are real wchar_t* methods but
+  are quarantine/sample/DLP handlers. PROC_IDX=42 was confirmed
+  via Binja dispatch-table walk + decompile of callees.
+
+  v3 fix: in _ndr_proc_has_wstring_param, follow FC_RP/FC_UP pointer
+  descriptors from the proc format string into the TYPE format string
+  and scan for FC_C_WSTRING there. ProcString and TypeFormatString are
+  separate blobs in MIDL_STUB_DESC — TYPE offset is at MIDL_SERVER_INFO
+  pStubDesc → TypeFormatString.
+
 This is `compose`-class output: it composes a `permissive_sddl`
 signal, a `toctou` signal, and the dispatch enumeration into
 a single PoC-anchor finding. It's the foundation for the
