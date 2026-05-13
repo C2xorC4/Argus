@@ -118,6 +118,15 @@ CATEGORY_META = {
             "[[Memory/Knowledge/argus_detector_design_principles]]",
         ],
     },
+    "remote_callable_path_method": {
+        "severity": Severity.MEDIUM,
+        "cwe": ["CWE-367"],
+        "mitre": ["T1068"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+            "[[Memory/Knowledge/windows_defender_attack_surface]]",
+        ],
+    },
     "remote_callable_vuln_method": {
         "severity": Severity.HIGH,
         "cwe": ["CWE-367"],
@@ -127,6 +136,21 @@ CATEGORY_META = {
         ],
     },
 }
+
+# Transfer syntax GUIDs in Windows binary (mixed-endian) form.
+# NDR32: 8a885d04-1ceb-11c9-9fe8-08002b104860
+# NDR64: 71710533-beba-4937-8319-b5dbef9ccc36
+_NDR32_TRANSFER_SYNTAX = bytes.fromhex("045d888aeb1cc9119fe808002b104860")
+_NDR64_TRANSFER_SYNTAX = bytes.fromhex("33057171babe37498319b5dbef9ccc36")
+
+# NDR format-string FC codes for wide-string path parameters.
+# Both codes appear in NDR32 and NDR64 type format strings —
+# the byte scan is grammar-agnostic.
+_FC_WSTRING   = 0x25  # [string] wchar_t* — null-terminated
+_FC_C_WSTRING = 0x26  # conformant (sized) wchar_t*
+
+# FmtStringOffset sentinel for methods with no format string.
+_NDR_NO_FORMAT = 0xFFFF
 
 
 def _uuid_str_to_binary(uuid_str: str) -> bytes:
@@ -296,6 +320,132 @@ def _find_function_by_name_substring(bv, needle: str):
             return fn
     return None
 
+
+# ── NDR v2 helpers ────────────────────────────────────────────────────────────
+
+def _binary_to_uuid_str(b: bytes) -> str:
+    """Convert Windows binary GUID (mixed-endian) to canonical string."""
+    if len(b) < 16:
+        return ""
+    d1 = struct.unpack("<I", b[0:4])[0]
+    d2 = struct.unpack("<H", b[4:6])[0]
+    d3 = struct.unpack("<H", b[6:8])[0]
+    return (f"{d1:08x}-{d2:04x}-{d3:04x}-"
+            f"{b[8:10].hex()}-{b[10:16].hex()}")
+
+
+def _read_transfer_syntax(bv, struct_base: int) -> str:
+    """Read and classify the RPC_SERVER_INTERFACE TransferSyntax field
+    at struct_base + 0x18. Returns 'NDR32', 'NDR64', or
+    'unknown:<uuid>' so callers can gate grammar-specific logic.
+
+    NDR32 and NDR64 use different ProcString grammars — a walker that
+    conflates them will produce confident wrong type maps. This
+    function gates the classification so the NDR walk can annotate
+    findings with which dialect was observed, even when the byte-scan
+    approach used here is grammar-agnostic.
+    """
+    try:
+        b = bv.read(struct_base + 0x18, 16)
+    except Exception:
+        return "unknown"
+    if not b or len(b) != 16:
+        return "unknown"
+    if b == _NDR32_TRANSFER_SYNTAX:
+        return "NDR32"
+    if b == _NDR64_TRANSFER_SYNTAX:
+        return "NDR64"
+    return f"unknown:{_binary_to_uuid_str(b)}"
+
+
+def _find_midl_server_info(
+        bv, struct_base: int,
+) -> tuple[Optional[int], Optional[int]]:
+    """Locate MIDL_SERVER_INFO via RPC_SERVER_INTERFACE.InterpreterInfo
+    at struct_base + 0x50 (x64 PE layout).
+
+    Returns (proc_string_ptr, fmt_offset_ptr) where:
+      proc_string_ptr — base of the NDR format string blob
+      fmt_offset_ptr  — base of the u16[] FmtStringOffset table
+                        (indexed by procnum → offset into ProcString)
+
+    Returns (None, None) on any navigation or sanity failure.
+
+    MIDL_SERVER_INFO layout (x64):
+      +0x00  pStubDesc        PMIDL_STUB_DESC
+      +0x08  DispatchTable    const SERVER_ROUTINE*
+      +0x10  ProcString       PFORMAT_STRING  ← format string base
+      +0x18  FmtStringOffset  const unsigned short*  ← per-method offsets
+      +0x20  ThunkTable       const STUB_THUNK*
+      +0x28  pTransferSyntax  PRPC_SYNTAX_IDENTIFIER
+      +0x30  nCount           ULONG_PTR
+      +0x38  pSyntaxInfo      PMIDL_SYNTAX_INFO
+    """
+    interp_ptr = _read_qword(bv, struct_base + 0x50)
+    if not interp_ptr or interp_ptr < bv.start or interp_ptr >= bv.end:
+        return None, None
+
+    proc_string_ptr = _read_qword(bv, interp_ptr + 0x10)
+    fmt_offset_ptr  = _read_qword(bv, interp_ptr + 0x18)
+
+    if (not proc_string_ptr or proc_string_ptr < bv.start
+            or proc_string_ptr >= bv.end):
+        return None, None
+    if (not fmt_offset_ptr or fmt_offset_ptr < bv.start
+            or fmt_offset_ptr >= bv.end):
+        return None, None
+
+    return proc_string_ptr, fmt_offset_ptr
+
+
+def _ndr_proc_has_wstring_param(
+        bv,
+        proc_string_ptr: int,
+        fmt_offset_ptr: int,
+        proc_idx: int,
+        method_count: int,
+) -> bool:
+    """Check whether NDR format string for proc_idx contains a
+    wchar_t* path-type parameter by scanning for FC_WSTRING (0x25)
+    or FC_C_WSTRING (0x26).
+
+    Scan is bounded by the next method's offset (or 256 bytes) to
+    avoid reading into an unrelated method's descriptor. Returns
+    False on any read failure or when the method has no format string
+    (_NDR_NO_FORMAT sentinel).
+
+    Grammar note: FC_WSTRING and FC_C_WSTRING appear in both NDR32
+    and NDR64 type format strings, so this scan works correctly for
+    both dialects. The result should always be annotated with the
+    transfer syntax (from _read_transfer_syntax) so the analyst can
+    distinguish dialects in the finding details.
+    """
+    offset_b = bv.read(fmt_offset_ptr + proc_idx * 2, 2)
+    if not offset_b or len(offset_b) != 2:
+        return False
+    proc_offset = struct.unpack("<H", offset_b)[0]
+    if proc_offset == _NDR_NO_FORMAT:
+        return False
+
+    scan_len = 256
+    if proc_idx + 1 < method_count:
+        next_b = bv.read(fmt_offset_ptr + (proc_idx + 1) * 2, 2)
+        if next_b and len(next_b) == 2:
+            next_offset = struct.unpack("<H", next_b)[0]
+            if (next_offset != _NDR_NO_FORMAT
+                    and next_offset > proc_offset):
+                scan_len = min(next_offset - proc_offset, 256)
+
+    try:
+        chunk = bv.read(proc_string_ptr + proc_offset, scan_len)
+    except Exception:
+        return False
+    if not chunk:
+        return False
+    return _FC_WSTRING in chunk or _FC_C_WSTRING in chunk
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Substrings whose presence in a dispatch handler's referenced
 # strings suggests the method touches filesystem paths — i.e. is a
@@ -511,6 +661,76 @@ def find_rpc_interface_methods(
                 },
             ))
 
+    # NDR v2 — format-string walk: identify which dispatch methods
+    # accept wchar_t* path parameters. Uses a bounded FC_WSTRING byte
+    # scan that works for both NDR32 and NDR64 dialects (FC codes are
+    # preserved across grammars; Oi2 header parsing is not needed for
+    # the path-type detection signal).
+    meta_path = CATEGORY_META["remote_callable_path_method"]
+    for interface_base, entries in discovered.items():
+        transfer_syntax = _read_transfer_syntax(bv, interface_base)
+        proc_string_ptr, fmt_offset_ptr = _find_midl_server_info(
+            bv, interface_base)
+        if proc_string_ptr is None:
+            continue
+        method_count = len(entries)
+        for proc_idx, dispatch_addr in enumerate(entries):
+            if dispatch_addr == 0:
+                continue
+            if not _ndr_proc_has_wstring_param(
+                    bv, proc_string_ptr, fmt_offset_ptr,
+                    proc_idx, method_count):
+                continue
+            handler_fn = _function_containing(bv, dispatch_addr)
+            handler_name = (
+                getattr(handler_fn, "name", "") or f"sub_{dispatch_addr:x}"
+            )
+            findings.append(Finding(
+                id="",
+                category="remote_callable_path_method",
+                severity=meta_path["severity"],
+                address=int(dispatch_addr),
+                function=handler_name,
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                knowledge_refs=list(meta_path["knowledge_refs"]),
+                cwe=list(meta_path["cwe"]),
+                mitre_attack=list(meta_path["mitre"]),
+                confidence=0.75,
+                description=(
+                    f"RPC interface {interface_uuid} method procnum "
+                    f"{proc_idx} ({handler_name}) accepts a wchar_t* "
+                    f"path-type parameter (FC_WSTRING/FC_C_WSTRING "
+                    f"detected in NDR format string; transfer syntax: "
+                    f"{transfer_syntax}). Low-privilege callers can "
+                    f"supply an attacker-controlled path to this "
+                    f"method — the BlueHammer-class exploitation "
+                    f"primitive when combined with a TOCTOU shape "
+                    f"on path resolution."
+                ),
+                evidence=[Evidence(
+                    kind="ndr_wstring_param",
+                    source=detector,
+                    payload=(
+                        f"interface_uuid={interface_uuid} "
+                        f"proc_idx={proc_idx} "
+                        f"handler=0x{dispatch_addr:x} "
+                        f"transfer_syntax={transfer_syntax} "
+                        f"ndr_scan=FC_WSTRING(0x25)|FC_C_WSTRING(0x26)"
+                    ),
+                    address=int(dispatch_addr),
+                    function=handler_name,
+                )],
+                details={
+                    "interface_uuid": interface_uuid,
+                    "proc_idx": proc_idx,
+                    "handler_addr": hex(int(dispatch_addr)),
+                    "handler_function": handler_name,
+                    "transfer_syntax": transfer_syntax,
+                    "ndr_fc_type": "FC_WSTRING",
+                },
+            ))
+
     return findings
 
 
@@ -562,4 +782,6 @@ def analyze(session, *, binary: Optional[str] = None,
 __all__ = [
     "analyze", "find_rpc_interface_methods", "CATEGORY_META",
     "_KNOWN_INTERFACES",
+    "_read_transfer_syntax", "_find_midl_server_info",
+    "_ndr_proc_has_wstring_param",
 ]

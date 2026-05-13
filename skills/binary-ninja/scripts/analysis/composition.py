@@ -68,6 +68,20 @@ CATEGORY_META = {
             "[[Memory/Knowledge/argus_detector_design_principles]]",
         ],
     },
+    # NDR v2 composition: a specific procnum that takes a wchar_t*
+    # argument (identified via NDR format-string walk) combined with
+    # permissive SDDL on the interface and a co-located TOCTOU shape.
+    # This is the named-procnum BlueHammer-class primitive: call
+    # procnum N with an attacker-controlled path, race the TOCTOU.
+    "rpc_callable_path_toctou": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-367", "CWE-284"],
+        "mitre": ["T1068", "T1574"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+            "[[Memory/Knowledge/windows_defender_attack_surface]]",
+        ],
+    },
 }
 
 
@@ -185,7 +199,15 @@ def compose(bv, findings: list[Finding], *, binary: str, arch: str,
                        if getattr(f, "category", "") == "toctou"]
     sddl_findings = [f for f in findings
                      if getattr(f, "category", "") == "permissive_sddl"]
-    if not toctou_findings or not sddl_findings:
+    rpc_path_findings = [f for f in findings
+                         if getattr(f, "category", "") == "remote_callable_path_method"]
+
+    # Require at least sddl + one of (toctou, rpc_path) to have
+    # anything to compose. Pure toctou-without-sddl is uninteresting;
+    # pure rpc_path-without-sddl means the interface isn't accessible.
+    if not sddl_findings:
+        return out
+    if not toctou_findings and not rpc_path_findings:
         return out
 
     # Pre-resolve each finding's containing function. The Finding's
@@ -208,17 +230,18 @@ def compose(bv, findings: list[Finding], *, binary: str, arch: str,
         if fn is not None:
             toctou_entries.append((tf, fn))
 
-    if not sddl_entries or not toctou_entries:
-        return out
-
     rpc_hosted, rpc_imports = _binary_hosts_rpc_or_com(bv)
+
+    # Gate the callgraph-reachability track on both shapes being present.
+    # NDR-path composition runs separately below regardless.
+    _do_toctou_track = bool(sddl_entries and toctou_entries)
 
     # For each TOCTOU, check reachability from each SDDL. Emit one
     # composite per (toctou, sddl) pair that's reachable. Cap at
     # the closest SDDL for each TOCTOU to avoid combinatorial blow-up.
     emitted_keys: set[tuple[int, int]] = set()
     matched_toctou_addrs: set[int] = set()
-    for tf, tfunc in toctou_entries:
+    for tf, tfunc in (toctou_entries if _do_toctou_track else []):
         best: Optional[tuple[int, object, object]] = None
         for sf, sfunc in sddl_entries:
             hops = _reachable(sfunc, tfunc, max_depth=max_reachability_hops)
@@ -318,7 +341,7 @@ def compose(bv, findings: list[Finding], *, binary: str, arch: str,
     # `MpComInitializeSecurity` sets SDDL on the COM interface, the
     # dispatch table maps methods to `MpIsPathSymlink`, only the
     # runtime dispatch connects them.
-    if True:  # Cooccurrence track is unconditional when both shapes present
+    if _do_toctou_track:  # Cooccurrence track requires both shapes
         meta = CATEGORY_META["rpc_hosted_toctou_cooccurrence"]
         for tf, _tfunc in toctou_entries:
             t_addr = _finding_addr(tf)
@@ -378,6 +401,99 @@ def compose(bv, findings: list[Finding], *, binary: str, arch: str,
                     "reachability_proven": False,
                 },
             ))
+
+    # NDR-path composition track: rpc_path_findings + sddl (+ toctou).
+    # When NDR v2 has identified specific procnums that take wchar_t*
+    # path parameters (remote_callable_path_method), combine them with
+    # permissive_sddl to name the exact PoC entry point. If toctou is
+    # also present in the same binary, the full BlueHammer-class chain
+    # is structural: call procnum N, supply attacker path, race TOCTOU.
+    if rpc_path_findings and sddl_findings:
+        meta_ndr = CATEGORY_META["rpc_callable_path_toctou"]
+        has_toctou = bool(toctou_findings)
+        ref_sddl = sddl_findings[0]
+        ref_sddl_fn = getattr(ref_sddl, "function", "<unknown>")
+        ref_sddl_addr = _finding_addr(ref_sddl)
+        try:
+            ref_sddl_text = (ref_sddl.details or {}).get("sddl_text", "") or ""
+        except Exception:
+            ref_sddl_text = ""
+
+        for rpf in rpc_path_findings:
+            proc_idx = 0
+            interface_uuid = ""
+            transfer_syntax = "unknown"
+            try:
+                d = rpf.details or {}
+                proc_idx = d.get("proc_idx", 0)
+                interface_uuid = d.get("interface_uuid", "")
+                transfer_syntax = d.get("transfer_syntax", "unknown")
+            except Exception:
+                pass
+            rp_addr = _finding_addr(rpf)
+            rp_fn = getattr(rpf, "function", "<unknown>")
+            chain_desc = (
+                f"NDR-confirmed path-taking RPC method: interface "
+                f"{interface_uuid} procnum {proc_idx} ({rp_fn}) "
+                f"accepts wchar_t* parameter (transfer syntax: "
+                f"{transfer_syntax}); interface has permissive SDDL "
+                f"({ref_sddl_fn} at 0x{ref_sddl_addr:x}"
+                + (f", SDDL: {ref_sddl_text[:80]}" if ref_sddl_text else "")
+                + f"). "
+                + (
+                    "TOCTOU race shape also present in binary — "
+                    "full BlueHammer-class chain: bind to interface, "
+                    f"call procnum {proc_idx} with attacker-controlled "
+                    "path, race symlink swap between check and use."
+                    if has_toctou else
+                    "No TOCTOU detected in same binary — path exposure "
+                    "confirmed but race primitive not co-located."
+                )
+            )
+            out.append(Finding(
+                id="",
+                category="rpc_callable_path_toctou",
+                severity=meta_ndr["severity"],
+                address=rp_addr,
+                function=rp_fn,
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                knowledge_refs=list(meta_ndr["knowledge_refs"]),
+                cwe=list(meta_ndr["cwe"]),
+                mitre_attack=list(meta_ndr["mitre"]),
+                confidence=0.85 if has_toctou else 0.65,
+                description=chain_desc,
+                evidence=[Evidence(
+                    kind="ndr_path_sddl_toctou_composition",
+                    source=detector,
+                    payload=(
+                        f"interface_uuid={interface_uuid} "
+                        f"proc_idx={proc_idx} "
+                        f"transfer_syntax={transfer_syntax} "
+                        f"sddl_fn={ref_sddl_fn} "
+                        f"has_toctou={has_toctou}"
+                    ),
+                    address=rp_addr,
+                    function=rp_fn,
+                )],
+                details={
+                    "interface_uuid": interface_uuid,
+                    "proc_idx": proc_idx,
+                    "handler_function": rp_fn,
+                    "handler_addr": hex(rp_addr),
+                    "transfer_syntax": transfer_syntax,
+                    "sddl_function": ref_sddl_fn,
+                    "sddl_addr": hex(ref_sddl_addr),
+                    "sddl_text": ref_sddl_text,
+                    "has_toctou_colocated": has_toctou,
+                    "exploitation_shape": (
+                        "bind → call_procnum_with_attacker_path → race_toctou"
+                        if has_toctou else
+                        "bind → call_procnum_with_attacker_path"
+                    ),
+                },
+            ))
+
     return out
 
 
@@ -405,4 +521,4 @@ def analyze(session, findings: Optional[list[Finding]] = None, *,
                    detector=detector)
 
 
-__all__ = ["analyze", "compose", "CATEGORY_META"]
+__all__ = ["analyze", "compose", "CATEGORY_META"]  # noqa: F401
