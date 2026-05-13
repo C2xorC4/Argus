@@ -402,19 +402,34 @@ def _find_midl_server_info(
     """
     interp_ptr = _read_qword(bv, struct_base + 0x50)
     if not interp_ptr or interp_ptr < bv.start or interp_ptr >= bv.end:
-        return None, None
+        return None, None, None
 
     proc_string_ptr = _read_qword(bv, interp_ptr + 0x10)
     fmt_offset_ptr  = _read_qword(bv, interp_ptr + 0x18)
 
     if (not proc_string_ptr or proc_string_ptr < bv.start
             or proc_string_ptr >= bv.end):
-        return None, None
+        return None, None, None
     if (not fmt_offset_ptr or fmt_offset_ptr < bv.start
             or fmt_offset_ptr >= bv.end):
-        return None, None
+        return None, None, None
 
-    return proc_string_ptr, fmt_offset_ptr
+    # v3: also return the TypeFormatString base (MIDL_STUB_DESC.pFormatTypes
+    # at pStubDesc + 0x40) so _ndr_proc_has_wstring_param can follow
+    # FC_RP/FC_UP pointer chains into the TYPE format string.
+    pstub_desc = _read_qword(bv, interp_ptr + 0x00)
+    type_format_ptr: Optional[int] = None
+    if pstub_desc and bv.start <= pstub_desc < bv.end:
+        tfp = _read_qword(bv, pstub_desc + 0x40)
+        if tfp and bv.start <= tfp < bv.end:
+            type_format_ptr = tfp
+
+    return proc_string_ptr, fmt_offset_ptr, type_format_ptr
+
+
+_FC_RP = 0x11  # reference pointer
+_FC_UP = 0x12  # unique pointer
+_FC_SIMPLE_POINTER = 0x08  # flags bit: type descriptor is inline (2 bytes)
 
 
 def _ndr_proc_has_wstring_param(
@@ -423,21 +438,30 @@ def _ndr_proc_has_wstring_param(
         fmt_offset_ptr: int,
         proc_idx: int,
         method_count: int,
+        type_format_ptr: Optional[int] = None,
 ) -> bool:
     """Check whether NDR format string for proc_idx contains a
-    wchar_t* path-type parameter by scanning for FC_WSTRING (0x25)
-    or FC_C_WSTRING (0x26).
+    wchar_t* path-type parameter.
 
-    Scan is bounded by the next method's offset (or 256 bytes) to
-    avoid reading into an unrelated method's descriptor. Returns
-    False on any read failure or when the method has no format string
-    (_NDR_NO_FORMAT sentinel).
+    v2: direct byte scan for FC_WSTRING (0x25) / FC_C_WSTRING (0x26)
+        in the proc format string chunk. Catches [string] wchar_t* params
+        encoded inline.
 
-    Grammar note: FC_WSTRING and FC_C_WSTRING appear in both NDR32
-    and NDR64 type format strings, so this scan works correctly for
-    both dialects. The result should always be annotated with the
-    transfer syntax (from _read_transfer_syntax) so the analyst can
-    distinguish dialects in the finding details.
+    v3: follow FC_RP (0x11) / FC_UP (0x12) pointer descriptors into the
+        TYPE format string and check for FC_C_WSTRING there. Catches the
+        common MIDL encoding for [ref/unique, string] wchar_t* params where
+        the type descriptor lives in the separate TypeFormatString blob.
+
+        FC_RP/FC_UP layout in proc format string:
+          byte 0: FC_RP or FC_UP
+          byte 1: flags (FC_SIMPLE_POINTER = 0x08 → type inline at byte 2)
+          bytes 2-3: if FC_SIMPLE_POINTER: inline type code + pad
+                     else: signed 16-bit offset from &offset_field into
+                           TypeFormatString (computed as:
+                           proc_string_ptr + proc_offset + i + 2 + signed_off)
+
+    Scan is bounded by the next method's offset (or 256 bytes). Returns
+    False on any read failure or when the method has no format string.
     """
     offset_b = bv.read(fmt_offset_ptr + proc_idx * 2, 2)
     if not offset_b or len(offset_b) != 2:
@@ -461,7 +485,40 @@ def _ndr_proc_has_wstring_param(
         return False
     if not chunk:
         return False
-    return _FC_WSTRING in chunk or _FC_C_WSTRING in chunk
+
+    # v2: fast path — FC_WSTRING / FC_C_WSTRING directly in proc format string.
+    if _FC_WSTRING in chunk or _FC_C_WSTRING in chunk:
+        return True
+
+    # v3: follow FC_RP / FC_UP pointer descriptors.
+    # The corrected BlueHammer fix: ServerMpUpdateEngineSignature's PWSTR
+    # parameter is encoded as FC_RP → TypeFormatString → FC_C_WSTRING
+    # (not as a direct FC_WSTRING byte in the proc chunk).
+    for i in range(len(chunk) - 3):
+        b = chunk[i]
+        if b not in (_FC_RP, _FC_UP):
+            continue
+        flags = chunk[i + 1]
+        if flags & _FC_SIMPLE_POINTER:
+            # Inline type: byte at i+2 is the type code.
+            if chunk[i + 2] in (_FC_WSTRING, _FC_C_WSTRING):
+                return True
+        else:
+            # Offset into TypeFormatString: signed 16-bit from position i+2.
+            signed_off = struct.unpack_from("<h", chunk, i + 2)[0]
+            # Target is absolute VA: offset field VA + signed_off.
+            offset_field_va = proc_string_ptr + proc_offset + i + 2
+            target_va = offset_field_va + signed_off
+            if not (bv.start <= target_va < bv.end):
+                continue
+            try:
+                tb = bv.read(target_va, 1)
+            except Exception:
+                continue
+            if tb and tb[0] in (_FC_WSTRING, _FC_C_WSTRING):
+                return True
+
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -688,7 +745,7 @@ def find_rpc_interface_methods(
     meta_path = CATEGORY_META["remote_callable_path_method"]
     for interface_base, entries in discovered.items():
         transfer_syntax = _read_transfer_syntax(bv, interface_base)
-        proc_string_ptr, fmt_offset_ptr = _find_midl_server_info(
+        proc_string_ptr, fmt_offset_ptr, type_format_ptr = _find_midl_server_info(
             bv, interface_base)
         if proc_string_ptr is None:
             continue
@@ -698,7 +755,8 @@ def find_rpc_interface_methods(
                 continue
             if not _ndr_proc_has_wstring_param(
                     bv, proc_string_ptr, fmt_offset_ptr,
-                    proc_idx, method_count):
+                    proc_idx, method_count,
+                    type_format_ptr=type_format_ptr):
                 continue
             handler_fn = _function_containing(bv, dispatch_addr)
             handler_name = (
@@ -735,7 +793,7 @@ def find_rpc_interface_methods(
                         f"proc_idx={proc_idx} "
                         f"handler=0x{dispatch_addr:x} "
                         f"transfer_syntax={transfer_syntax} "
-                        f"ndr_scan=FC_WSTRING(0x25)|FC_C_WSTRING(0x26)"
+                        f"ndr_scan=v3(FC_RP/FC_UP→TypeFmt)|v2(FC_WSTRING/FC_C_WSTRING)"
                     ),
                     address=int(dispatch_addr),
                     function=handler_name,
@@ -746,7 +804,8 @@ def find_rpc_interface_methods(
                     "handler_addr": hex(int(dispatch_addr)),
                     "handler_function": handler_name,
                     "transfer_syntax": transfer_syntax,
-                    "ndr_fc_type": "FC_WSTRING",
+                    "ndr_fc_type": "FC_WSTRING|FC_RP→FC_C_WSTRING",
+                    "ndr_scanner_version": "v3",
                 },
             ))
 

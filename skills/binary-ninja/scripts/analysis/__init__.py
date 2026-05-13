@@ -21,15 +21,16 @@ and consumes patterns from `..heuristics` modules where applicable.
 """
 
 from . import (
-    _il_helpers, attack_surface, chains, crypto, heap, linux_exploit,
-    mitigations, obfuscation, source_surface, surface, taint, windows_drivers,
+    _il_helpers, attack_surface, chains, cloud_files, crypto, heap,
+    linux_exploit, mitigations, obfuscation, source_surface, surface,
+    taint, windows_drivers,
 )
 from .surface import SectionInfo, TargetProfile, analyze, build_profile
 
 __all__ = [
     "surface", "mitigations", "taint", "heap",
     "crypto", "obfuscation", "chains", "attack_surface",
-    "windows_drivers", "source_surface", "linux_exploit",
+    "cloud_files", "windows_drivers", "source_surface", "linux_exploit",
     "_il_helpers",
     "SectionInfo", "TargetProfile",
     "analyze", "build_profile",

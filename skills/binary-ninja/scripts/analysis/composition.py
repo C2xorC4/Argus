@@ -68,6 +68,22 @@ CATEGORY_META = {
             "[[Memory/Knowledge/argus_detector_design_principles]]",
         ],
     },
+    # NDR v3 composition: RPC path-method + Cloud Files write-proxy import.
+    # When a procnum that takes wchar_t* co-exists with CfRegisterSyncRoot /
+    # CfConnectSyncRoot etc., the attacker can both (a) call the method with
+    # an attacker-controlled path AND (b) register a sync-root callback to
+    # hold Defender's scan thread in the TOCTOU window deterministically.
+    # Full BlueHammer stall chain without requiring TOCTOU to be co-located
+    # in the same binary (Cloud Files callback is the stall primitive).
+    "rpc_callable_cloud_stall": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-367", "CWE-284"],
+        "mitre": ["T1068", "T1574"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+            "[[Memory/Knowledge/windows_defender_attack_surface]]",
+        ],
+    },
     # NDR v2 composition: a specific procnum that takes a wchar_t*
     # argument (identified via NDR format-string walk) combined with
     # permissive SDDL on the interface and a co-located TOCTOU shape.
@@ -401,6 +417,83 @@ def compose(bv, findings: list[Finding], *, binary: str, arch: str,
                     "reachability_proven": False,
                 },
             ))
+
+    # Cloud Files composition track: cloud_files_write_proxy is already
+    # emitted by cloud_files.py with its own TOCTOU/SDDL co-location logic.
+    # Add a composition-level finding when a cloud_files_write_proxy finding
+    # AND an rpc_path_finding exist in the same binary: this names the specific
+    # procnum that triggers the cloud-restore flow (BlueHammer stall + path).
+    cf_proxy_findings = [f for f in findings
+                         if getattr(f, "category", "") == "cloud_files_write_proxy"]
+    if cf_proxy_findings and rpc_path_findings:
+        meta_cf = CATEGORY_META.get("rpc_callable_cloud_stall")
+        if meta_cf:
+            for rpf in rpc_path_findings:
+                proc_idx = 0
+                interface_uuid = ""
+                transfer_syntax = "unknown"
+                try:
+                    d = rpf.details or {}
+                    proc_idx = d.get("proc_idx", 0)
+                    interface_uuid = d.get("interface_uuid", "")
+                    transfer_syntax = d.get("transfer_syntax", "unknown")
+                except Exception:
+                    pass
+                rp_addr = _finding_addr(rpf)
+                rp_fn = getattr(rpf, "function", "<unknown>")
+                cf_imports = []
+                try:
+                    cf_imports = (cf_proxy_findings[0].details or {}).get(
+                        "cf_write_imports", [])
+                except Exception:
+                    pass
+                out.append(Finding(
+                    id="",
+                    category="rpc_callable_cloud_stall",
+                    severity=meta_cf["severity"],
+                    address=rp_addr,
+                    function=rp_fn,
+                    binary=binary, arch=arch, platform=platform,
+                    detector=detector,
+                    knowledge_refs=list(meta_cf["knowledge_refs"]),
+                    cwe=list(meta_cf["cwe"]),
+                    mitre_attack=list(meta_cf["mitre"]),
+                    confidence=0.85,
+                    description=(
+                        f"RPC method {interface_uuid} procnum {proc_idx} "
+                        f"({rp_fn}) takes a wchar_t* path parameter AND the "
+                        f"binary imports Cloud Files write-proxy API "
+                        f"({', '.join(cf_imports)}). "
+                        f"BlueHammer stall shape: attacker calls this procnum, "
+                        f"registers a Cloud Files sync root to block Defender's "
+                        f"scan thread in the TOCTOU window, then redirects the "
+                        f"path via NtCreateSymbolicLinkObject."
+                    ),
+                    evidence=[Evidence(
+                        kind="rpc_path_cloud_files_composition",
+                        source=detector,
+                        payload=(
+                            f"interface_uuid={interface_uuid} "
+                            f"proc_idx={proc_idx} "
+                            f"transfer_syntax={transfer_syntax} "
+                            f"cf_imports={','.join(cf_imports)}"
+                        ),
+                        address=rp_addr,
+                        function=rp_fn,
+                    )],
+                    details={
+                        "interface_uuid": interface_uuid,
+                        "proc_idx": proc_idx,
+                        "handler_function": rp_fn,
+                        "handler_addr": hex(rp_addr),
+                        "transfer_syntax": transfer_syntax,
+                        "cf_write_imports": cf_imports,
+                        "exploitation_shape": (
+                            "bind → call_procnum_with_attacker_path → "
+                            "cloud_files_stall → race_toctou_symlink"
+                        ),
+                    },
+                ))
 
     # NDR-path composition track: rpc_path_findings + sddl (+ toctou).
     # When NDR v2 has identified specific procnums that take wchar_t*
