@@ -33,6 +33,12 @@ from .local import (
     verify_local,
     verify_finding_locally,
 )
+from .remote_chain import (
+    DEFAULT_WIN_PATTERNS,
+    DEFAULT_EVTLOG_PATTERNS,
+    verify_windows_remote,
+    verify_chain_poc_on_windows,
+)
 from .triage import (
     apply_verification,
     load_findings,
@@ -45,6 +51,8 @@ from .triage import (
 __all__ = [
     "DEFAULT_DMESG_PATTERNS",
     "DEFAULT_CRASH_PATTERNS",
+    "DEFAULT_WIN_PATTERNS",
+    "DEFAULT_EVTLOG_PATTERNS",
     "Evidence",
     "FileDelta",
     "FileSnapshot",
@@ -58,5 +66,7 @@ __all__ = [
     "verify_remote",
     "verify_local",
     "verify_finding_locally",
+    "verify_windows_remote",
+    "verify_chain_poc_on_windows",
     "write_run_log",
 ]

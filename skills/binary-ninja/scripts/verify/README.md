@@ -8,7 +8,9 @@ Argus's Phase-4 stage transitions Findings from **DETECTED**
 
 | Module | What it does |
 |---|---|
-| `sanitizer.py` | SSH-driven primitive: runs plan-declared setup commands, captures probe-file pre-snapshots, drains dmesg, runs the trigger, captures post-snapshots and dmesg deltas, runs teardown commands, rolls up a CONFIRMED / IMPACT_VERIFIED verdict. |
+| `sanitizer.py` | SSH-driven primitive (Linux): runs plan-declared setup commands, captures probe-file pre-snapshots, drains dmesg, runs the trigger, captures post-snapshots and dmesg deltas, runs teardown commands, rolls up a CONFIRMED / IMPACT_VERIFIED verdict. |
+| `local.py` | Local-subprocess variant of sanitizer.py: same plan schema and VerificationResult shape, runs the trigger command on the same host. |
+| `remote_chain.py` | SSH-driven primitive (Windows): PowerShell file probing (Get-FileHash), Event Log capture (Get-WinEvent) in place of dmesg, Defender status snapshot (Get-MpComputerStatus), SCP upload for PoC scripts. Plan mode: `windows_remote`. Convenience wrapper `verify_chain_poc_on_windows()` for direct PoC path → HMDXIN execution. |
 | `triage.py` | Plan-driven orchestrator: matches a `verification.json` to Findings via `applies_to`, runs `sanitizer.verify_remote`, walks each Finding through the state machine (DETECTED → CONFIRMED → IMPACT_VERIFIED), persists evidence + run log. |
 
 ### Verification-plan schema (Phase-4 minimal)
