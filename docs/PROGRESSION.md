@@ -12,14 +12,11 @@ large.
 |---|---|---|---|
 | 0.1 | Wider clean-corpus FP sweep (Linux ELF + real-world targets) | half-day | ✅ done 2026-05-07 (15 Windows binaries, results in `dev/corpus_sweep_2026-05-07.json`) |
 | 0.2 | Substrate-coherence check — `jm associate` against new findings, optional `--substrate-check` flag in runner | 1-2h | ✅ done 2026-05-07 (`runner.py --substrate-check`; fuzzy token-overlap matching) |
-| 0.3 | Per-module `manual_workflows/<module>.md` for the modules touched in the May 7 session | 1 day | ✅ done 2026-05-07 (9 docs: sddl, integrity_check_order, cleanup_dominance, trusted_path, triage, exploit, differ, patch, output-vendor) |
+| 0.3 | Per-module `manual_workflows/<module>.md` for the modules touched in the May 7 session | 1 day | ✅ done 2026-05-07 (9 docs: sddl, integrity_check_order, cleanup_dominance, trusted_path, triage, exploit, differ, patch, output-vendor). NE-added modules: ✅ done 2026-05-14 (rpc_interface, cloud_files, composition, remote_chain — commit `bb8a660`) |
 
 **Pre-existing modules still missing manual_workflow docs** (separate
 follow-on, not session-scope): `uninit`, `types`, `race`,
 `windows_drivers`, `source_surface`, plus user-authored `linux_exploit`.
-**NightmareEclipse additions (gate-6 pending):** `rpc_interface`,
-`cloud_files`, `composition`, `remote_chain`. Each adds gate-6 readiness
-for that module specifically.
 
 ## Tier 1 — High-impact binary-only (most blackbox runs benefit)
 
@@ -29,60 +26,49 @@ for that module specifically.
 | 1.2 | 1 | Buffer-content taint — tainted-stack-slot bookkeeping in `taint.py` bridges the `&var_N` aliasing gap (snprintf taints rcx#1=&var_N; system reads from rcx_1#2=&var_N — same slot, different SSA var). | 1-2 day build | ✅ done 2026-05-08 (C cell PASS, no regressions across Phase 2 + Tier-2; cpp variant deferred — std::string MLIL shape is a separate gap) |
 | 1.3 | 2-blackbox | `cleanup_dominance` v2 — verify-call-presence gate, suppresses notepad-class FP | 0.5 day | ✅ done 2026-05-08 (FPs went 12 → 0 in clean-corpus sweep; Tier-2 EAC PASS preserved) |
 | 1.4 | 2-blackbox | `trusted_path` v2 — xref/taint from path-string to load callsite | 1 day | ✅ done 2026-05-11 (per-callsite SSA back-walk; `trusted_path_xref_to_load` HIGH; v1 suppressed when v2 fires; commit `bffceb2`) |
-| 1.5 | 1 | E2 robustness — CcProtect + Viragt64 dispatch-write paths | 0.5-1 day | ✅ done 2026-05-11 (commit `bffceb2`) |
-| 1.6 | 1 | Gate-6 manual_workflow docs for NE-added modules — `rpc_interface`, `cloud_files`, `composition`, `remote_chain` (four docs) | 0.5 day | ✅ done 2026-05-14 (`analysis-rpc_interface.md`, `analysis-cloud_files.md`, `analysis-composition.md`, `verify-remote_chain.md`) |
-| 1.7 | 2 | composition.py v2 — cross-binary reachability: static import table + known service-dispatch table walk so SDDL-protected entry in DLL A can reach TOCTOU in DLL B (currently same-binary only) | 1-2 days | ✅ done 2026-05-14 (`compose_cross_binary` + `_imported_function_names` + `cross_binary_remote_callable_toctou`; `analyze()` accepts `peer_cluster=`; 30 tests; commit `23336c3`) |
-| 1.8 | 4 | NightmareEclipse §7–9 — BlueHammer (CONFIRMED-with-patch-mitigation-documented), RedSun (IMPACT_VERIFIED — SYSTEM shell), UnDefend (IMPACT_VERIFIED — Defender update failure) on HMDXIN | 2-4 sessions | High — first Windows multi-process chain IMPACT_VERIFIED transitions |
+| 1.5 | 1 | E2 robustness — CcProtect + Viragt64 dispatch-write paths | 0.5-1 day | ✅ done 2026-05-11 (nested-add offset fold in `_trace_offset_any`; BYOVD-13 dispatch resolution 12/13 → 13/13; commit `bffceb2`) |
+| 1.6 | 1 | Gate-6 manual_workflow docs for NE-added modules — `rpc_interface`, `cloud_files`, `composition`, `remote_chain` (four docs) | 0.5 day | ✅ done 2026-05-14 (`analysis-rpc_interface.md`, `analysis-cloud_files.md`, `analysis-composition.md`, `verify-remote_chain.md`; commit `bb8a660`) |
+| 1.7 | 2 | composition.py v2 — cross-binary reachability via import-table bridge so SDDL-protected entry in DLL A can reach TOCTOU in DLL B | 1-2 days | ✅ done 2026-05-14 (`compose_cross_binary` + `_imported_function_names` + `cross_binary_remote_callable_toctou`; `analyze()` accepts `peer_cluster=`; 30 tests; commit `23336c3`) |
+| 1.8 | 4 | NightmareEclipse §7–9 — BlueHammer, RedSun, UnDefend PoC validation on HMDXIN | 2-4 sessions | ✅ partial 2026-05-13: BlueHammer CONFIRMED (post-patch — race window closed; patch mitigation documented); RedSun CONFIRMED (Cloud Files step absent, §8b deferred); UnDefend **IMPACT_VERIFIED** (Defender update failure in Event Log confirmed). See Active Operations for §8b open thread. |
 
 ## Active Operations
 
 | # | Item | Status | Done when |
 |---|---|---|---|
-| NE.7 | BlueHammer (CVE-2026-33825) on HMDXIN | **Stub** — `_poc/bluehammer_poc.py` ready; needs PROC_IDX from NDR v3 re-run against HMDXIN-specific DLL version | CONFIRMED-with-patch-mitigation-documented (HMDXIN is post-patch) |
-| NE.8 | RedSun on HMDXIN | **Stub** — `_poc/redsun_poc.py` ready; needs Cloud Files placeholder step + staging payload | IMPACT_VERIFIED — SYSTEM shell on HMDXIN; payload binary in SYSTEM process list |
-| NE.9 | UnDefend on HMDXIN | **Stub** — `_poc/undefend_poc.py` ready | IMPACT_VERIFIED — Defender definition-update failure in Event Log during run; clean resume after exit |
-| NE.10 | Comparison — independent PoCs vs public Nightmare-Eclipse reference | ☐ | Diff doc: method choice, sentinel, substitution primitive, reliability, stealth delta |
-| NE.11 | Post-mortem — methodology + Argus enhancement backlog | ☐ | Doc committed; Argus issue list filed |
+| NE.7 | BlueHammer (CVE-2026-33825) on HMDXIN | ✅ **CONFIRMED** 2026-05-13 — post-patch HMDXIN; race window closed by patch. Patch mitigation documented in §10 comparison. | CONFIRMED-with-patch-mitigation-documented ✅ |
+| NE.8 | RedSun on HMDXIN | ✅ **CONFIRMED** 2026-05-13 — Cloud Files placeholder step absent from PoC; System32 write blocked. `cloudfiles_primitive.py` built and ready (commit `f6fbe59`). §8b deferred. | IMPACT_VERIFIED — SYSTEM shell on HMDXIN; payload binary in SYSTEM process list |
+| NE.8b | RedSun §8b — IMPACT_VERIFIED via Cloud Files placeholder | **Open** — `cloudfiles_primitive.py` (ctypes wrapper for CldApi.dll) ready in `NightmareEclipse/_poc/`. Needs `CfRegisterSyncRoot` + `CfConnectSyncRoot` + placeholder creation + NTFS junction swap wired into `redsun_poc.py` trigger. HMDXIN is the target (unpatched as of 2026-05-14). | IMPACT_VERIFIED — SYSTEM shell; probe file in System32 or SYSTEM process list |
+| NE.9 | UnDefend on HMDXIN | ✅ **IMPACT_VERIFIED** 2026-05-13 — Defender definition-update failure confirmed in Event Log during run; clean service resume after exit. | Done ✅ |
+| NE.10 | Comparison — independent PoCs vs public Nightmare-Eclipse reference | ✅ **done** 2026-05-14 (session 007) — `section_10_comparison.md` committed; proc_idx=42 row updated; NDR divergence entry marked FIXED. | Done ✅ |
+| NE.11 | Post-mortem — methodology + Argus enhancement backlog | ✅ **done** 2026-05-14 (session 007) — `section_11_postmortem.md` committed; three Argus extensions documented (cloud_files detector ✅ done, NDR v3b ✅ done, rpc_callable_cloud_stall ✅ done). | Done ✅ |
 
 ## Tier 2 — Phase 1 lower-impact
 
-| # | Item | Effort |
-|---|---|---|
-| 2.1 | Architecture-notes Knowledge entry on TTP-altitude design choice | 2-3h |
-| 2.4 | `weak_prng_in_security_path` UI/keyboard exclusion filter — "Key" in names like `IsItemKeyFocused`, `IsDeleteKeyInvokedInSearch`, `HandleAccessKeyMessages` triggers the security-path gate; need a denylist of UI/keyboard name tokens | 1-2h | Medium — taskmgr.exe produced 46 FPs on this class (2026-05-13 run) |
-| 2.5 | `chains.ue5_prng_cookie_amplification` context discriminator — chain requires game/UE5 binary indicators (e.g. UE5 string markers, module name, high LCG-XOR volume) before firing; currently over-fires on any binary with 46+ weak_prng findings | 1-2h | Medium — taskmgr.exe triggered the chain FP (2026-05-13 run) |
-| 2.6 | explorer.exe `rpc_hosted_toctou_cooccurrence` triage — **TRIAGED 2026-05-13**: TOCTOU is in `CLogonTaskFramework::s_WriteOutOOBEDataForOEMApp` (PathFileExistsW→CreateFileW/DeleteFileW on a path var); SDDL findings are KR/GR Read-only grants to World on a registry key and a per-user shared object. Composition BFS hit via Logon/OOBE callgraph proximity, not via an actual low-privilege IPC entry. Finding is **FP at exploitation-grade** — the permissive SDDL does not expose the TOCTOU to a remote low-privilege caller. Relevant follow-ups: SDDL FP class (2.7) + composition module narrative fix (2.8). |
-| 2.7 | SDDL detector — Read-only World grant false-positive: registry `KR` to Everyone and object `GR` to Everyone are normal for public resources; detector should gate HIGH on Write/Execute/Create grants, not on Read grants. Currently fires HIGH on any World grant regardless of rights. | 1-2h | Medium — explorer SDDL findings are both benign Read-only |
-| 2.8 | composition.py `rpc_hosted_toctou_cooccurrence` description fix | ✅ done 2026-05-13 — replaced Defender-specific "BlueHammer / RedSun" narrative with `_classify_lpe_shape()` (path-race vs token-race discriminator from TOCTOU evidence payload; 6/6 tests pass). `lpe_class` field added to both `remote_callable_toctou` and `rpc_hosted_toctou_cooccurrence` finding details. |
-| 2.2 | Decimal IOCTL constant parsing in `source_surface` | 2-3h |
-| 2.3 | K7-style standalone-PoC source parsing | 0.5 day |
+| # | Item | Effort | Status |
+|---|---|---|---|
+| 2.1 | Architecture-notes Knowledge entry on TTP-altitude design choice | 2-3h | ✅ done 2026-05-11 (commit `bffceb2`) |
+| 2.2 | Decimal IOCTL constant parsing in `source_surface` | 2-3h | Open |
+| 2.3 | K7-style standalone-PoC source parsing | 0.5 day | Open |
+| 2.4 | `weak_prng_in_security_path` UI/keyboard exclusion filter | 1-2h | ✅ done 2026-05-14 (`_KEY_UI_DENYLIST` in `crypto.py`; suppresses IsItemKeyFocused-class matches; commit `8d4c8b1`) |
+| 2.5 | `chains.ue5_prng_cookie_amplification` context discriminator | 1-2h | ✅ done 2026-05-14 (`min_per_primitive={"weak_prng_in_security_path": 3}` + field in `ChainPattern`; commit `8d4c8b1`) |
+| 2.6 | explorer.exe `rpc_hosted_toctou_cooccurrence` triage | — | ✅ **TRIAGED 2026-05-13** — FP at exploitation-grade. TOCTOU is in `CLogonTaskFramework::s_WriteOutOOBEDataForOEMApp`; SDDL findings are KR/GR read-only grants (not write-enabling). Root causes closed by 2.7 + 2.8. |
+| 2.7 | SDDL detector — read-only World grant false-positive | 1-2h | ✅ done 2026-05-14 (read-only carve-out extended to all overbroad principals; GR/KR grants on WD/BU → neutral; write/create rights still fire; commit `8d4c8b1`) |
+| 2.8 | composition.py `rpc_hosted_toctou_cooccurrence` description fix | 1h | ✅ done 2026-05-13 (`_classify_lpe_shape()` discriminator; `lpe_class` field in finding details) |
 
-## Tier 3 — Phase 2 source-required (lowest blackbox utility)
-
-| # | Item | Effort |
-|---|---|---|
-| 3.1 | Source-side taint as independent pass | 2-3 days |
-| 3.2 | Cross-function structural alignment for zero-callee functions | 1 day |
-| 3.3 | DWARF / PDB consumption when debug symbols exist | 1-2 days |
-| 3.4 | libclang / tree-sitter parser swap | 1-2 days |
-| 3.5 | IOCTL switch enumeration from binary | 1-2 days |
-
-## Sprint plan
+## Sprint log
 
 **Sprint 1:** Tier 0 — every detector gets gate-2 baseline + manual_workflow. ✅ Done 2026-05-07.
 
 **Sprint 2:** Tier 1.1, 1.2, 1.3 — real detection deltas on common blackbox cases. ✅ Done 2026-05-08.
 
-**Sprint 3 (active):** NightmareEclipse §7–9 (NE.7–NE.9) — first Windows multi-process chain IMPACT_VERIFIED runs against HMDXIN. Run concurrently: Tier 1.4 (trusted_path v2) + Tier 1.6 (gate-6 docs for NE modules).
+**Sprint 3:** Tier 1.4 (trusted_path v2) + 1.5 (E2 robustness) + 2.1 (architecture-notes). Also delivered: `dynamic_sink_arg.py` (new format-string/command/path sink detector), Phase-4 `auto_triage` bridge (`phase4_triage` declarative JSON schema), or-of-categories chain slot syntax, C++ stdlib sink registrations in `race.py`/`imports.py`, `uninit.py` stack footprint aggregator, WARN-pass on vulntest runner. vulntest pass-rate 20/6/57 → 33/0/50. ✅ Done 2026-05-11 (commit `bffceb2`).
 
-**Sprint 4:** Tier 1.5 (E2 robustness) + Tier 1.7 (composition.py v2 cross-binary reachability) + Tier 2.1 (architecture-notes Knowledge entry). NE.10–NE.11 (comparison + post-mortem) close out the NightmareEclipse arc.
+**Sprint 4:** NightmareEclipse §0–§11 (RPC walker, NDR v2/v3b, cloud_files detector, composition v1+rpc_callable_cloud_stall, Windows-lab harness, BlueHammer/RedSun/UnDefend PoC runs, §10 comparison, §11 post-mortem). Also: FP fixes 2.4/2.5/2.7, composition v2 cross-binary reachability (1.7), gate-6 docs 1.6. 154 tests total. ✅ Done 2026-05-14.
 
-**Defer:** Tier 3 — revisit only when an active engagement requires source-aware analysis.
+**Sprint 5 (active):** Tier 2.2 (IOCTL decimal parsing) + 2.3 (K7 PoC parsing). Optional: NE.8b RedSun IMPACT_VERIFIED via Cloud Files. Tier 3 deferred unless engagement requires source-aware analysis.
 
 ## Promotion-gate dependencies
 
-- **Gate 2 (No FP):** closed once Tier 0.1 completes for all detectors with results captured per-detector.
-- **Gate 3 (PoC validation):** blocked on Phase 4 verification integration; not addressed by this progression list.
-- **Gate 6 (Documentation):** closed once Tier 0.3 ships the missing `manual_workflows/<module>.md` files.
-
-After Sprint 1 completes, Phase 1 + Phase 2 detectors that already pass gates 1, 4, 5 will have all-non-PoC gates clean — promotion-ready except for the Phase 4 dependency.
+- **Gate 2 (No FP):** closed for all Sprint 1–4 detectors. Per-detector results in `dev/corpus_sweep_2026-05-07.json` and `dev/corpus_sweep_2026-05-09.json`. FP fixes 2.4/2.5/2.7 applied 2026-05-14.
+- **Gate 3 (PoC validation):** Phase-4 `auto_triage` bridge live; NE chain IMPACT_VERIFIED transitions confirmed (UnDefend). Blocked on per-detector PoC cells for remaining detection gaps (50 FAIL-no-binary or Pass-3 gaps).
+- **Gate 6 (Documentation):** closed for all Sprint 1–4 detectors. Remaining gap: `uninit`, `types`, `race`, `windows_drivers`, `source_surface`, `linux_exploit` still missing `manual_workflows/` docs.
