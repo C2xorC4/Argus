@@ -84,6 +84,17 @@ CATEGORY_META = {
             "[[Memory/Knowledge/windows_defender_attack_surface]]",
         ],
     },
+    # Cross-binary composition: SDDL in binary A + TOCTOU in binary B,
+    # bridged by A's import table containing the specific TOCTOU function
+    # from B. Multi-DLL service clusters are the primary consumer.
+    "cross_binary_remote_callable_toctou": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-367", "CWE-284"],
+        "mitre": ["T1068", "T1574"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/argus_detector_design_principles]]",
+        ],
+    },
     # NDR v2 composition: a specific procnum that takes a wchar_t*
     # argument (identified via NDR format-string walk) combined with
     # permissive SDDL on the interface and a co-located TOCTOU shape.
@@ -197,6 +208,83 @@ def _finding_addr(f: Finding) -> int:
         except ValueError:
             return 0
     return 0
+
+
+_PATH_RACE_TOKENS = frozenset([
+    "pathfileexists", "getfileattributes", "createfile", "deletefile",
+    "movefile", "copyfile", "findfirstfile", "findnextfile", "removedirectory",
+    "createdirectory", "setfileinformation", "ntcreatefile", "ntopenfile",
+    "zwcreatefile", "zwopenfile", "pathisrelative", "pathcanonicalize",
+])
+_TOKEN_RACE_TOKENS = frozenset([
+    "impersonate", "rpcimpersonate", "setthreadtoken", "openthreadtoken",
+    "duplicatetoken", "createtoken", "logonuser", "reverttoself",
+    "adjusttokenprivileges",
+])
+
+
+def _toctou_payload(finding) -> str:
+    """Extract the concatenated evidence payload string from a TOCTOU finding.
+    The payload typically contains API names like 'PathFileExistsW -> CreateFileW'.
+    """
+    evs = getattr(finding, "evidence", None) or []
+    return " ".join(getattr(e, "payload", "") for e in evs)
+
+
+def _imported_function_names(bv) -> frozenset:
+    """Return frozenset of imported function names visible in bv.
+
+    In production Binja, uses get_symbols_of_type for the ImportedFunctionSymbol
+    kind. Falls back to iterating bv.symbols.values() (MockBV path — only
+    import names are populated there, so all names are treated as imports).
+    """
+    names: set[str] = set()
+    if bv is None:
+        return frozenset()
+    try:
+        from binaryninja import SymbolType
+        for sym in bv.get_symbols_of_type(SymbolType.ImportedFunctionSymbol):
+            n = getattr(sym, "name", "") or ""
+            if n:
+                names.add(n)
+        return frozenset(names)
+    except (ImportError, TypeError, AttributeError, Exception):
+        pass
+    try:
+        items = (bv.symbols.values()
+                 if hasattr(bv.symbols, "values") else bv.symbols)
+        for sym in items:
+            if hasattr(sym, "__iter__") and not isinstance(sym, str):
+                for s in sym:
+                    n = getattr(s, "name", "") or ""
+                    if n:
+                        names.add(n)
+            else:
+                n = getattr(sym, "name", "") or ""
+                if n:
+                    names.add(n)
+    except Exception:
+        pass
+    return frozenset(names)
+
+
+def _classify_lpe_shape(fn_name: str, toctou_evidence_payload: str = "") -> str:
+    """Classify the LPE shape from a TOCTOU function name and/or evidence.
+
+    Returns 'path-race' (BlueHammer/file-symlink class),
+    'token-race' (FakePotato/impersonation class), or 'unknown'.
+
+    Checks the evidence payload first (contains actual API names like
+    PathFileExistsW@0x... -> CreateFileW@0x...) before falling back to
+    the containing function name. Mangled C++ names rarely spell out the
+    API token directly so the payload check is the higher-signal path.
+    """
+    combined = (fn_name + " " + toctou_evidence_payload).lower()
+    if any(tok in combined for tok in _PATH_RACE_TOKENS):
+        return "path-race (file/symlink class)"
+    if any(tok in combined for tok in _TOKEN_RACE_TOKENS):
+        return "token-race (impersonation/FakePotato class)"
+    return "unknown — check TOCTOU function name and evidence payload manually"
 
 
 def compose(bv, findings: list[Finding], *, binary: str, arch: str,
@@ -339,6 +427,7 @@ def compose(bv, findings: list[Finding], *, binary: str, arch: str,
                 "sddl_addr": hex(s_addr),
                 "sddl_text": sddl_text,
                 "reachability_hops": hops,
+                "lpe_class": _classify_lpe_shape(t_fn_name, _toctou_payload(tf)),
                 "source_findings": [
                     {"category": "toctou", "id": getattr(tf, "id", "")},
                     {"category": "permissive_sddl", "id": getattr(sf, "id", "")},
@@ -393,9 +482,11 @@ def compose(bv, findings: list[Finding], *, binary: str, arch: str,
                     + (f" (Binary imports RPC host APIs: "
                        f"{', '.join(rpc_imports[:5])})"
                        if rpc_hosted else "")
-                    + " This is the structural shape exploited by "
-                    f"the public BlueHammer / RedSun (Chaotic Eclipse, "
-                    f"April 2026) chains."
+                    + f" Triage: verify (1) SDDL rights grant write/exec "
+                    f"(not read-only) to low-privilege callers; "
+                    f"(2) TOCTOU function is reachable via a low-privilege "
+                    f"IPC call path; (3) classify race shape: "
+                    f"{_classify_lpe_shape(t_fn_name, _toctou_payload(tf))}."
                 ),
                 evidence=[Evidence(
                     kind="cross_detector_cooccurrence",
@@ -414,6 +505,7 @@ def compose(bv, findings: list[Finding], *, binary: str, arch: str,
                     "sddl_function": ref_s_fn,
                     "sddl_addr": hex(ref_s_addr),
                     "rpc_host_imports": rpc_imports,
+                    "lpe_class": _classify_lpe_shape(t_fn_name, _toctou_payload(tf)),
                     "reachability_proven": False,
                 },
             ))
@@ -590,9 +682,145 @@ def compose(bv, findings: list[Finding], *, binary: str, arch: str,
     return out
 
 
+def compose_cross_binary(
+    cluster: list[dict],
+    *,
+    detector: str = "analysis.composition",
+) -> list[Finding]:
+    """Cross-binary composition via import-table bridge.
+
+    `cluster` is a list of dicts, one per binary in the service cluster:
+        {
+            "bv":       <BinaryView or None>,
+            "binary":   "MpSvc.dll",
+            "arch":     "x86_64",
+            "platform": "windows-x86_64",
+            "findings": [<Finding>, ...],
+        }
+
+    For each pair (A, B) where A ≠ B:
+      - A has at least one permissive_sddl finding
+      - B has at least one toctou finding
+      - A's import table contains the name of B's TOCTOU-containing function
+
+    When all three conditions hold, emit `cross_binary_remote_callable_toctou`
+    (HIGH, confidence 0.75) naming the specific cross-module reachability path.
+
+    Confidence is 0.75 rather than the same-binary 0.8 because the import-
+    table match proves A can call B's function, but does not prove that the
+    specific SDDL entry point's callgraph reaches that import site (only that
+    A imports it somewhere). Use in conjunction with same-binary `compose()`.
+    """
+    out: list[Finding] = []
+    if not cluster or len(cluster) < 2:
+        return out
+
+    meta = CATEGORY_META.get("cross_binary_remote_callable_toctou")
+    if not meta:
+        return out
+
+    # Build per-binary index: binary_name → {bv, arch, platform, findings}
+    entries: dict[str, dict] = {}
+    for entry in cluster:
+        b = entry.get("binary", "")
+        if b:
+            entries[b] = entry
+
+    # Cache imported function names per binary to avoid redundant extraction.
+    import_cache: dict[str, frozenset] = {
+        b: _imported_function_names(e.get("bv"))
+        for b, e in entries.items()
+    }
+
+    emitted: set[tuple[str, str, int]] = set()  # (bin_a, bin_b, toctou_addr)
+
+    for bin_a, entry_a in entries.items():
+        sddl_findings = [f for f in entry_a.get("findings", [])
+                         if getattr(f, "category", "") == "permissive_sddl"]
+        if not sddl_findings:
+            continue
+        imports_a = import_cache.get(bin_a, frozenset())
+
+        for bin_b, entry_b in entries.items():
+            if bin_b == bin_a:
+                continue
+            toctou_findings = [f for f in entry_b.get("findings", [])
+                                if getattr(f, "category", "") == "toctou"]
+            if not toctou_findings:
+                continue
+
+            for tf in toctou_findings:
+                toctou_fn = getattr(tf, "function", "") or ""
+                if toctou_fn not in imports_a:
+                    continue  # no import-table match
+
+                t_addr = _finding_addr(tf)
+                key = (bin_a, bin_b, t_addr)
+                if key in emitted:
+                    continue
+                emitted.add(key)
+
+                ref_sf = sddl_findings[0]
+                s_addr = _finding_addr(ref_sf)
+                s_fn = getattr(ref_sf, "function", "<unknown>")
+                lpe_cls = _classify_lpe_shape(toctou_fn, _toctou_payload(tf))
+
+                out.append(Finding(
+                    id="",
+                    category="cross_binary_remote_callable_toctou",
+                    severity=meta["severity"],
+                    address=t_addr,
+                    function=toctou_fn,
+                    binary=bin_a,
+                    arch=entry_a.get("arch", "unknown"),
+                    platform=entry_a.get("platform", "unknown"),
+                    detector=detector,
+                    knowledge_refs=list(meta["knowledge_refs"]),
+                    cwe=list(meta["cwe"]),
+                    mitre_attack=list(meta["mitre"]),
+                    confidence=0.75,
+                    description=(
+                        f"Cross-binary remote-callable TOCTOU. "
+                        f"{bin_a} has permissive SDDL on {s_fn} "
+                        f"(0x{s_addr:x}) and its import table contains "
+                        f"{toctou_fn}, which holds a TOCTOU race at "
+                        f"0x{t_addr:x} in {bin_b}. "
+                        f"A low-privilege caller can invoke {bin_a}'s "
+                        f"IPC entry and reach the race via the "
+                        f"cross-module import. LPE shape: {lpe_cls}."
+                    ),
+                    evidence=[Evidence(
+                        kind="cross_binary_import_composition",
+                        source=detector,
+                        payload=(
+                            f"sddl_binary={bin_a} sddl_fn={s_fn} "
+                            f"sddl_addr=0x{s_addr:x} "
+                            f"toctou_binary={bin_b} "
+                            f"toctou_fn={toctou_fn} "
+                            f"toctou_addr=0x{t_addr:x} "
+                            f"bridge=import_table"
+                        ),
+                        address=t_addr,
+                        function=toctou_fn,
+                    )],
+                    details={
+                        "sddl_binary": bin_a,
+                        "sddl_function": s_fn,
+                        "sddl_addr": hex(s_addr),
+                        "toctou_binary": bin_b,
+                        "toctou_function": toctou_fn,
+                        "toctou_addr": hex(t_addr),
+                        "cross_binary_bridge": "import_table_function_match",
+                        "lpe_class": lpe_cls,
+                    },
+                ))
+    return out
+
+
 def analyze(session, findings: Optional[list[Finding]] = None, *,
             binary: Optional[str] = None,
             arch: Optional[str] = None, platform: Optional[str] = None,
+            peer_cluster: Optional[list[dict]] = None,
             detector: str = "analysis.composition",
             ) -> list[Finding]:
     """Composition entry-point. UNLIKE other Argus analyzers, this
@@ -601,6 +829,13 @@ def analyze(session, findings: Optional[list[Finding]] = None, *,
 
     Callers that don't pass `findings` get an empty list back —
     composition is post-detection, not standalone.
+
+    `peer_cluster` enables cross-binary composition. Pass a list of
+    dicts (one per binary in the service cluster, including this one):
+        [{"bv": bv, "binary": name, "arch": a, "platform": p,
+          "findings": [...]}]
+    When provided, `compose_cross_binary` runs in addition to the
+    same-binary `compose` track.
     """
     if session is None or not findings:
         return []
@@ -610,8 +845,11 @@ def analyze(session, findings: Optional[list[Finding]] = None, *,
     binary = binary or getattr(session, "binary_path", "") or ""
     arch = arch or (str(bv.arch) if bv.arch else "unknown")
     platform = platform or (str(bv.platform) if bv.platform else "unknown")
-    return compose(bv, findings, binary=binary, arch=arch, platform=platform,
-                   detector=detector)
+    out = compose(bv, findings, binary=binary, arch=arch, platform=platform,
+                  detector=detector)
+    if peer_cluster:
+        out.extend(compose_cross_binary(peer_cluster, detector=detector))
+    return out
 
 
-__all__ = ["analyze", "compose", "CATEGORY_META"]  # noqa: F401
+__all__ = ["analyze", "compose", "compose_cross_binary", "CATEGORY_META"]  # noqa: F401
