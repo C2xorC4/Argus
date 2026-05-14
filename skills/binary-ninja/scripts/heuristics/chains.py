@@ -101,6 +101,9 @@ UE5_PRNG_COOKIE_AMPLIFICATION = ChainPattern(
     # Only `weak_prng_in_security_path` has an implementing detector
     # as of 2026-05-07; raise this to 3 when the other two land.
     min_primitives=1,
+    # Require ≥3 independent weak_prng_in_security_path findings before
+    # firing — a single hit is not sufficient signal for this chain shape.
+    min_per_primitive={"weak_prng_in_security_path": 3},
 )
 
 
@@ -454,6 +457,14 @@ def match(bv, *, binary: str, arch: str, platform: str,
                     else len(chain.primitives))
         if len(matched_prims) < required:
             continue
+        # Per-primitive count gate: if chain specifies min_per_primitive,
+        # count how many findings carry each gated category.
+        if chain.min_per_primitive:
+            counts = {cat: sum(1 for f in existing_findings if f.category == cat)
+                      for cat in chain.min_per_primitive}
+            if any(counts.get(cat, 0) < n
+                   for cat, n in chain.min_per_primitive.items()):
+                continue
         # Flatten all categories from all slots for anchor / detail lookup.
         all_chain_cats: set[str] = set()
         for s in chain.primitives:

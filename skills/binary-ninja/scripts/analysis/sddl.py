@@ -167,11 +167,13 @@ def _classify_ace(ace_type: str, rights: str, sid: str) -> AceFinding:
             i += 1
 
     if sid in _OVERBROAD_PRINCIPALS:
-        # Over-broad principal — almost any non-trivial right is concerning
-        # Authenticated Users with read-only rights is conditionally OK
-        if sid == "AU" and rights_set and rights_set.issubset(_GRANT_RIGHTS_OK_FOR_AU):
+        # Over-broad principal — almost any non-trivial right is concerning.
+        # Read-only grants (GR/KR/FR/GX/FX/RC) are conditionally OK for any
+        # overbroad principal — public registry keys, shared sections, etc.
+        # Write/create/execute rights always warrant a permissive finding.
+        if rights_set and rights_set.issubset(_GRANT_RIGHTS_OK_FOR_AU):
             severity = "neutral"
-            rationale = f"Authenticated Users with read-only rights — OK for read-only resources"
+            rationale = f"{_OVERBROAD_PRINCIPALS[sid]}; read-only rights only — OK for public resources"
         elif rights_set & _BROAD_WRITE_RIGHTS:
             severity = "permissive"
             rationale = (f"{_OVERBROAD_PRINCIPALS[sid]}; granted "

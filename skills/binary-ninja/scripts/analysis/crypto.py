@@ -76,6 +76,16 @@ _SEC_NAME_RE = re.compile(
 
 _PRIMARY_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# When _SEC_NAME_RE matches `key`, suppress if the function name contains
+# UI/keyboard context — IsItemKeyFocused, HandleAccessKeyMessages, etc.
+# These are not cryptographic key references.
+_KEY_UI_DENYLIST: frozenset = frozenset({
+    "keyboard", "keystroke", "keydown", "keyup", "keypress",
+    "keycode", "keymap", "keybind", "hotkey", "accesskey",
+    "accelerator", "shortcut", "keyfocus", "keyinvok", "keysearch",
+    "keymessage", "keyhandl",
+})
+
 
 def _user_facing_identifier(name: str) -> Optional[str]:
     """Extract the primary user-facing identifier from a function name,
@@ -160,6 +170,9 @@ def _security_named_context(function) -> Optional[str]:
         # caller" context.
         return None
     m = _SEC_NAME_RE.search(primary)
+    if m and m.group("tok").lower() == "key":
+        if any(tok in primary.lower() for tok in _KEY_UI_DENYLIST):
+            m = None
     if m:
         return f"function:{name}~{m.group('tok').lower()}"
     try:

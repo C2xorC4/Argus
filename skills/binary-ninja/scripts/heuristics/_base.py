@@ -156,6 +156,7 @@ class ChainPattern(Pattern):
     ordered: bool = True
     same_function: bool = False
     min_primitives: Optional[int] = None
+    min_per_primitive: Optional[dict] = None
 
 
 # ─────────────────────────────────────────────────────────────────
