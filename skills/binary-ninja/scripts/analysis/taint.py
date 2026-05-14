@@ -15,7 +15,10 @@ Limitations (Phase 1 baseline; iterate in 1+):
   are caught only when the SSA propagation already carries the taint
   through the alias.
 - Inter-procedural depth defaults to 2; deeper chains are partial.
-- Indirect calls (function pointer) are not followed.
+- Indirect calls (function pointer) are partially followed via Binja
+  value analysis; resolution succeeds when type info is available
+  (vtable entries in typed COM/C++ binaries) and silently skips
+  when analysis cannot determine the callee.
 - No path-sensitivity; `if (sanitised) { sink(x); } else { sink(x); }`
   produces a single Finding even if the sanitised branch is safe.
 
@@ -1295,30 +1298,107 @@ class TaintAnalyzer:
             any_propagated = True
         return any_propagated
 
+    def _resolve_indirect_call_targets(self, call_inst) -> list:
+        """Resolve possible callee addresses for an indirect call.
+
+        Uses Binja's value analysis on the call destination expression.
+        Returns a list of integer function addresses. Empty when value
+        analysis cannot determine the callee (most stripped binaries).
+
+        Two resolution paths:
+
+        1. PossibleValueSet on `dest` directly — succeeds when Binja's
+           type system has resolved a vtable entry to a concrete address
+           (common in typed COM / C++ binaries with PDB symbols).
+
+        2. SSA-def walk through a Load expression — vtable dispatch
+           typically looks like `rax = [vtable_ptr + 8]; call rax`.
+           When the load's possible values include a concrete address,
+           we recover the callee from the load's value analysis result.
+        """
+        if call_inst is None or self.bv is None:
+            return []
+        dest = getattr(call_inst, "dest", None)
+        if dest is None:
+            return []
+
+        targets: list[int] = []
+
+        def _extract_from_pv(pv) -> None:
+            if pv is None:
+                return
+            cval = getattr(pv, "value", None)
+            if cval is not None:
+                try:
+                    targets.append(int(cval))
+                except Exception:
+                    pass
+            for item in (getattr(pv, "values", None) or []):
+                try:
+                    targets.append(int(item))
+                except Exception:
+                    pass
+
+        # Path 1: direct value analysis on the dest expression.
+        _extract_from_pv(getattr(dest, "possible_values", None)
+                         or getattr(dest, "value", None))
+
+        # Path 2: dest is an SSA var whose def is a Load (vtable fetch).
+        if not targets:
+            ssa_v = ilh.expr_to_ssa_var(dest)
+            if ssa_v is not None:
+                func = getattr(call_inst, "function", None)
+                if func is not None:
+                    defn = ilh.ssa_def_of(func, ssa_v)
+                    src_expr = getattr(defn, "src", None) if defn is not None else None
+                    if src_expr is not None and "Load" in type(src_expr).__name__:
+                        _extract_from_pv(
+                            getattr(src_expr, "possible_values", None)
+                            or getattr(src_expr, "value", None)
+                        )
+
+        # Filter to addresses that resolve to actual in-binary functions.
+        valid: list[int] = []
+        for addr in targets:
+            if addr == 0:
+                continue
+            try:
+                fn = self.bv.get_function_at(addr)
+                if fn is not None:
+                    valid.append(addr)
+            except Exception:
+                pass
+        return valid
+
     def _propagate_into_callee(self, call_inst, tainted_var, depth: int,
                                source_name: str, source_addr: int,
                                visited: Optional[set] = None) -> None:
         """When a tainted var is passed to an in-binary callee, follow
         into the matching parameter's SSA chain. `visited` threaded
         from the caller so cross-function steps remain part of the
-        same seed's exploration."""
-        callee_addr = ilh.callee_address_of_call(call_inst)
-        if callee_addr is None:
-            return
-        callees = list(self.bv.get_functions_containing(callee_addr)) or []
-        if not callees:
-            try:
-                f = self.bv.get_function_at(callee_addr)
-                if f is not None:
-                    callees = [f]
-            except Exception:
-                pass
-        if not callees:
-            return
-        callee = callees[0]
+        same seed's exploration.
 
+        Handles both direct calls (callee address is a constant in the
+        call instruction) and indirect calls (vtable / function-pointer
+        dispatch). For indirect calls, `_resolve_indirect_call_targets`
+        is used to enumerate candidate callees via Binja value analysis;
+        when value analysis cannot determine the callee the hop is
+        silently skipped.
+        """
+        callee_addr = ilh.callee_address_of_call(call_inst)
+
+        if callee_addr is not None:
+            candidate_addrs = [callee_addr]
+        else:
+            # Indirect call — try value analysis.
+            candidate_addrs = self._resolve_indirect_call_targets(call_inst)
+
+        if not candidate_addrs:
+            return
+
+        # Locate the param slot carrying the tainted var — same across
+        # all candidate callees since it's the same call instruction.
         params = ilh.call_params(call_inst)
-        # Find which parameter slot carries the tainted var
         param_idx = None
         for i, p in enumerate(params):
             ssa = ilh.expr_to_ssa_var(p)
@@ -1328,29 +1408,40 @@ class TaintAnalyzer:
         if param_idx is None:
             return
 
-        callee_params = list(getattr(callee, "parameter_vars", []) or [])
-        if param_idx >= len(callee_params):
-            return
-        callee_param = callee_params[param_idx]
-        # Promote the parameter to its SSA form (version 0 typically)
-        # Binja API: callee.mlil.ssa_form.get_ssa_var_definition
-        # finds the def site; for parameters, we want all uses.
-        mlil = getattr(callee, "mlil", None)
-        if mlil is None or getattr(mlil, "ssa_form", None) is None:
-            return
-        ssa_form = mlil.ssa_form
-        # Construct an SSAVariable wrapper. Binja exposes
-        # SSAVariable(var, version); use version 0 for the param.
         try:
             from binaryninja import SSAVariable  # type: ignore
-            ssa_var = SSAVariable(callee_param, 0)
         except Exception:
-            # Fallback: skip the cross-function hop
             return
 
-        self._propagate(ssa_var, callee, depth,
-                        source_name, source_addr,
-                        visited=visited)
+        for addr in candidate_addrs:
+            callees = list(self.bv.get_functions_containing(addr)) or []
+            if not callees:
+                try:
+                    f = self.bv.get_function_at(addr)
+                    if f is not None:
+                        callees = [f]
+                except Exception:
+                    pass
+            if not callees:
+                continue
+            callee = callees[0]
+
+            callee_params = list(getattr(callee, "parameter_vars", []) or [])
+            if param_idx >= len(callee_params):
+                continue
+            callee_param = callee_params[param_idx]
+            # Promote the parameter to its SSA form (version 0 typically).
+            mlil = getattr(callee, "mlil", None)
+            if mlil is None or getattr(mlil, "ssa_form", None) is None:
+                continue
+            try:
+                ssa_var = SSAVariable(callee_param, 0)
+            except Exception:
+                continue
+
+            self._propagate(ssa_var, callee, depth,
+                            source_name, source_addr,
+                            visited=visited)
 
     # ── Top-level run ────────────────────────────────────────────
 

@@ -12,9 +12,22 @@ back from the load callsite's path argument to a constant
 pointer; if that pointer resolves to a string in the binary's
 string table containing an attacker-writable token, emit.
 
-When v2 fires for a binary, v1 is suppressed for that binary
-(v2 is strictly more informative for the proven cases — v1 only
-adds value when no specific flow could be resolved).
+v3 — computed/registry/env-var path: fires
+`trusted_path_computed_load` (HIGH) when the load-API's path
+argument is a stack buffer populated by a registry read
+(RegQueryValueEx, RegGetValue, SHGetValue), an environment
+variable expansion (GetEnvironmentVariable,
+ExpandEnvironmentStrings), or a computed path function
+(GetTempPath, SHGetFolderPath, SHGetKnownFolderPath,
+PathCombine). v2 back-walk handles only literal wchar_t*
+constants; these sources produce runtime values that bypass the
+constant-pointer check. Detection uses OUT-parameter tracking:
+locates calls to the above APIs in the same function whose OUT
+buffer arg resolves to the same stack slot as the load callsite's
+path argument.
+
+v1 is suppressed when either v2 or v3 fires (both are more
+informative than binary-scope co-presence).
 
 Knowledge anchors:
 - `[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]`
@@ -42,6 +55,14 @@ CATEGORY_META = {
         "severity": Severity.HIGH,
         "cwe": ["CWE-345", "CWE-426"],
         "mitre": ["T1574"],
+        "knowledge_refs": [
+            "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]",
+        ],
+    },
+    "trusted_path_computed_load": {
+        "severity": Severity.HIGH,
+        "cwe": ["CWE-345", "CWE-426", "CWE-427"],
+        "mitre": ["T1574", "T1574.001"],
         "knowledge_refs": [
             "[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]",
         ],
@@ -88,6 +109,249 @@ _LOAD_PATH_ARG_INDEX: dict[str, int] = {
     "dlopen": 0,
     "dlmopen": 1,           # Lmid_t lmid, const char *filename
 }
+
+
+# ── v3: computed/registry/env-var path sources ───────────────────────────────
+
+# APIs that read a path from the registry into a caller-supplied OUT buffer.
+_REGISTRY_READ_APIS: frozenset[str] = frozenset({
+    "RegQueryValueExA", "RegQueryValueExW",
+    "RegGetValueA", "RegGetValueW",
+    "SHGetValueA", "SHGetValueW",
+})
+
+# APIs that expand or retrieve environment-variable paths into a buffer.
+_ENVVAR_READ_APIS: frozenset[str] = frozenset({
+    "GetEnvironmentVariableA", "GetEnvironmentVariableW",
+    "ExpandEnvironmentStringsA", "ExpandEnvironmentStringsW",
+})
+
+# APIs that compute a path (temp dir, known folder, module path, combination)
+# and write the result into a caller-supplied OUT buffer.
+_COMPUTED_PATH_APIS: frozenset[str] = frozenset({
+    "GetTempPathA", "GetTempPathW",
+    "GetTempPath2A", "GetTempPath2W",
+    "SHGetFolderPathA", "SHGetFolderPathW",
+    "SHGetKnownFolderPath",
+    "PathCombineA", "PathCombineW",
+    "GetModuleFileNameA", "GetModuleFileNameW",
+})
+
+_ALL_COMPUTED_PATH_SOURCES: frozenset[str] = (
+    _REGISTRY_READ_APIS | _ENVVAR_READ_APIS | _COMPUTED_PATH_APIS
+)
+
+# OUT-parameter index (0-based) for each computed-path source API.
+# This is the argument that receives the path bytes.
+_COMPUTED_PATH_OUT_ARG_IDX: dict[str, int] = {
+    # RegQueryValueEx(hKey, lpValueName, lpReserved, lpType, lpData, lpcbData)
+    "RegQueryValueExA": 4, "RegQueryValueExW": 4,
+    # RegGetValue(hKey, lpSubKey, lpValue, dwFlags, pvData, pcbData)
+    "RegGetValueA": 5, "RegGetValueW": 5,
+    # SHGetValue(hKey, pszSubKey, pszValue, pdwType, pvData, pcbData)
+    "SHGetValueA": 4, "SHGetValueW": 4,
+    # GetEnvironmentVariable(lpName, lpBuffer, nSize)
+    "GetEnvironmentVariableA": 1, "GetEnvironmentVariableW": 1,
+    # ExpandEnvironmentStrings(lpSrc, lpDst, nSize)
+    "ExpandEnvironmentStringsA": 1, "ExpandEnvironmentStringsW": 1,
+    # GetTempPath(nBufferLength, lpBuffer)
+    "GetTempPathA": 1, "GetTempPathW": 1,
+    "GetTempPath2A": 1, "GetTempPath2W": 1,
+    # SHGetFolderPath(hwnd, csidl, hToken, dwFlags, pszPath)
+    "SHGetFolderPathA": 4, "SHGetFolderPathW": 4,
+    # SHGetKnownFolderPath(rfid, dwFlags, hToken, ppszPath) — arg3 is PWSTR*
+    "SHGetKnownFolderPath": 3,
+    # PathCombine(pszDest, pszDir, pszFile) — dest is arg 0
+    "PathCombineA": 0, "PathCombineW": 0,
+    # GetModuleFileName(hModule, lpFilename, nSize)
+    "GetModuleFileNameA": 1, "GetModuleFileNameW": 1,
+}
+
+
+def _extract_addr_of_slot(func, expr) -> Optional[str]:
+    """If `expr` is `&local_var` or an SSA var defined as `&local_var`,
+    return str(local_var). Used to identify stack buffers passed as OUT
+    params to computed-path APIs and then consumed by load-class APIs.
+    """
+    if expr is None:
+        return None
+    op_name = type(expr).__name__
+    if "AddressOf" in op_name or "Addr" in op_name:
+        slot = getattr(expr, "src", None) or getattr(expr, "var", None)
+        if slot is not None:
+            return str(slot)
+    ssa = ilh.expr_to_ssa_var(expr)
+    if ssa is None or func is None:
+        return None
+    defn = ilh.ssa_def_of(func, ssa)
+    if defn is None:
+        return None
+    src = getattr(defn, "src", None)
+    if src is None:
+        return None
+    src_op = type(src).__name__
+    if "AddressOf" in src_op or "Addr" in src_op:
+        slot = getattr(src, "src", None) or getattr(src, "var", None)
+        if slot is not None:
+            return str(slot)
+    return None
+
+
+def _scan_function_for_computed_path_writes(
+        bv, func, imports: frozenset) -> dict[str, str]:
+    """Scan a function's call instructions for computed-path API calls
+    that write a path into a stack buffer via an OUT parameter.
+
+    Returns {str(stack_var): api_name} so that later code can check
+    whether a load-API's path arg points to the same stack slot.
+    """
+    result: dict[str, str] = {}
+    ssa_form = ilh._to_ssa_form(func)
+    if ssa_form is None:
+        return result
+    bv_syms = getattr(bv, "get_symbol_at", None)
+    if not callable(bv_syms):
+        return result
+    for inst in (getattr(ssa_form, "instructions", None) or []):
+        op_name = type(inst).__name__
+        if "Call" not in op_name:
+            continue
+        dest = getattr(inst, "dest", None)
+        if dest is None:
+            continue
+        cval = getattr(dest, "constant", None)
+        if cval is None:
+            continue
+        try:
+            sym = bv_syms(int(cval))
+        except Exception:
+            continue
+        if sym is None:
+            continue
+        api_name = getattr(sym, "short_name", None) or getattr(sym, "name", "")
+        if api_name not in _COMPUTED_PATH_OUT_ARG_IDX or api_name not in imports:
+            continue
+        out_idx = _COMPUTED_PATH_OUT_ARG_IDX[api_name]
+        params = ilh.call_params(inst)
+        if out_idx >= len(params):
+            continue
+        slot = _extract_addr_of_slot(func, params[out_idx])
+        if slot is not None:
+            result[slot] = api_name
+    return result
+
+
+def find_trusted_path_computed_load(
+        bv, *, binary: str, arch: str, platform: str,
+        detector: str = "analysis.trusted_path",
+) -> list[Finding]:
+    """v3 — computed/registry/env-var path detector.
+
+    For every load-class call site, check whether the path argument is a
+    stack buffer that was populated by a registry read, env-var expansion,
+    or computed-path API in the same function. If so, emit
+    `trusted_path_computed_load` HIGH — the path is attacker-influenceable
+    via registry writes, environment variables, or other external state.
+    """
+    findings: list[Finding] = []
+    if bv is None:
+        return findings
+    imports = imports_in(bv)
+    relevant_load_apis = [a for a in _LOAD_PATH_ARG_INDEX if a in imports]
+    if not relevant_load_apis:
+        return findings
+    if not (_ALL_COMPUTED_PATH_SOURCES & imports):
+        return findings
+
+    meta = CATEGORY_META["trusted_path_computed_load"]
+    # Per-function cache: avoid re-scanning the same function multiple times
+    # when several load-API call sites live in the same function.
+    func_key_to_writes: dict[int, dict[str, str]] = {}
+    seen_keys: set[tuple[str, str, int]] = set()
+
+    for api in relevant_load_apis:
+        path_idx = _LOAD_PATH_ARG_INDEX[api]
+        for call_addr, mlil in ilh.call_sites_of_import(bv, api):
+            if mlil is None:
+                continue
+            params = ilh.call_params(mlil)
+            if len(params) <= path_idx:
+                continue
+            func = getattr(mlil, "function", None)
+            if func is None:
+                continue
+            sf = getattr(func, "source_function", None) or func
+            fname = (getattr(sf, "name", "")
+                     or f"sub_{getattr(sf, 'start', 0):x}")
+
+            # Get or build the computed-path-writes map for this function.
+            fstart = int(getattr(sf, "start", 0) or 0)
+            if fstart not in func_key_to_writes:
+                func_key_to_writes[fstart] = _scan_function_for_computed_path_writes(
+                    bv, func, imports,
+                )
+            writes = func_key_to_writes[fstart]
+            if not writes:
+                continue
+
+            # Check whether the path arg resolves to a written stack slot.
+            path_slot = _extract_addr_of_slot(func, params[path_idx])
+            if path_slot is None:
+                continue
+            source_api = writes.get(path_slot)
+            if source_api is None:
+                continue
+
+            key = (fname, api, int(call_addr))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            if source_api in _REGISTRY_READ_APIS:
+                source_label = "registry read"
+            elif source_api in _ENVVAR_READ_APIS:
+                source_label = "environment variable"
+            else:
+                source_label = "computed path function"
+
+            findings.append(Finding(
+                id="",
+                category="trusted_path_computed_load",
+                severity=meta["severity"],
+                address=int(call_addr),
+                function=fname,
+                binary=binary, arch=arch, platform=platform,
+                detector=detector,
+                knowledge_refs=list(meta["knowledge_refs"]),
+                cwe=list(meta["cwe"]),
+                mitre_attack=list(meta["mitre"]),
+                description=(
+                    f"{fname}: load API {api}@0x{call_addr:x} consumes a "
+                    f"path sourced from {source_label} ({source_api}). "
+                    f"The buffer at stack slot '{path_slot}' is populated "
+                    f"by {source_api} before being passed to {api} — "
+                    f"registry writes / environment manipulation can redirect "
+                    f"this load to an attacker-controlled path."
+                ),
+                evidence=[Evidence(
+                    kind="computed_path_to_load_callsite",
+                    source=detector,
+                    payload=(f"source={source_api} ({source_label}) "
+                             f"slot={path_slot!r} "
+                             f"load_api={api} call_addr=0x{call_addr:x}"),
+                    address=int(call_addr),
+                    function=fname,
+                )],
+                details={
+                    "load_api": api,
+                    "call_addr": hex(int(call_addr)),
+                    "source_api": source_api,
+                    "source_type": source_label,
+                    "stack_slot": path_slot,
+                },
+            ))
+
+    return findings
 
 
 def _build_string_addr_index(bv) -> dict[int, str]:
@@ -377,16 +641,20 @@ def analyze(session, *, binary: Optional[str] = None,
     arch = arch or (str(bv.arch) if bv.arch else "unknown")
     platform = platform or (str(bv.platform) if bv.platform else "unknown")
 
-    # v2 first — proven flows beat binary-scope co-presence.
+    # v2 — literal constant path → load callsite (SSA back-walk).
     v2 = find_trusted_path_xref_to_load(
         bv, binary=binary, arch=arch, platform=platform, detector=detector,
     )
-    if v2:
-        # When v2 has fired at all, v1 adds no information (any
-        # remaining unresolved paths are either unreachable or
-        # tracked via patterns v2 doesn't model yet — emitting v1
-        # alongside v2 would just duplicate the binary-level signal).
-        return v2
+    # v3 — computed/registry/env-var path → load callsite (OUT-param scan).
+    # Complements v2: fires on runtime-determined paths that have no
+    # constant-pointer literal in the SSA def chain.
+    v3 = find_trusted_path_computed_load(
+        bv, binary=binary, arch=arch, platform=platform, detector=detector,
+    )
+    if v2 or v3:
+        # v1 (binary-scope co-presence) adds no information when either
+        # per-callsite detector has fired; suppress to avoid duplicate signal.
+        return v2 + v3
 
     return find_trusted_path_loads(
         bv, binary=binary, arch=arch, platform=platform, detector=detector,

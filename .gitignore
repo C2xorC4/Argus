@@ -53,6 +53,11 @@ vulntest/_samples/
 vulntest/private/
 **/private-targets/
 
+# ── Operator validation results (HTB, live engagements, PoC runs) ──
+# Scratch workspace for active exploitation work — flags, solve scripts,
+# PoC runs, VPN configs. Never commit; re-derive from challenge files.
+vulntest/validation/
+
 # ── Binary Ninja state ──────────────────────────────────────────
 *.bndb
 *.bnpkg

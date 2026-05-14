@@ -13,10 +13,7 @@ large.
 | 0.1 | Wider clean-corpus FP sweep (Linux ELF + real-world targets) | half-day | ✅ done 2026-05-07 (15 Windows binaries, results in `dev/corpus_sweep_2026-05-07.json`) |
 | 0.2 | Substrate-coherence check — `jm associate` against new findings, optional `--substrate-check` flag in runner | 1-2h | ✅ done 2026-05-07 (`runner.py --substrate-check`; fuzzy token-overlap matching) |
 | 0.3 | Per-module `manual_workflows/<module>.md` for the modules touched in the May 7 session | 1 day | ✅ done 2026-05-07 (9 docs: sddl, integrity_check_order, cleanup_dominance, trusted_path, triage, exploit, differ, patch, output-vendor). NE-added modules: ✅ done 2026-05-14 (rpc_interface, cloud_files, composition, remote_chain — commit `bb8a660`) |
-
-**Pre-existing modules still missing manual_workflow docs** (separate
-follow-on, not session-scope): `uninit`, `types`, `race`,
-`windows_drivers`, `source_surface`, plus user-authored `linux_exploit`.
+| 0.4 | Gate-6 completion — `manual_workflows/` docs for remaining pre-existing modules: `uninit`, `types`, `race`, `windows_drivers`, `source_surface`, `linux_exploit` (6 docs) | 0.5 day | Open |
 
 ## Tier 1 — High-impact binary-only (most blackbox runs benefit)
 
@@ -47,13 +44,22 @@ follow-on, not session-scope): `uninit`, `types`, `race`,
 | # | Item | Effort | Status |
 |---|---|---|---|
 | 2.1 | Architecture-notes Knowledge entry on TTP-altitude design choice | 2-3h | ✅ done 2026-05-11 (commit `bffceb2`) |
-| 2.2 | Decimal IOCTL constant parsing in `source_surface` | 2-3h | Open |
-| 2.3 | K7-style standalone-PoC source parsing | 0.5 day | Open |
+| 2.2 | Decimal IOCTL constant parsing in `source_surface` | 2-3h | ✅ done 2026-05-14 (decimal literal support in `_IOCTL_CMP_RE`/`_IOCTL_DIC_RE`; `switch(IoControlCode){case:}` block scanner `_scan_ioctl_switch_cases`; `CTL_CODE(dev,fn,method,access)` macro decoder `_scan_ctl_code_macros` with 24-entry device-type table; `_parse_ioctl_int` helper handles hex+decimal+signed) |
+| 2.3 | K7-style standalone-PoC source parsing | 0.5 day | ✅ done 2026-05-14 (`_scan_py_poc_bindings` + `parse_poc_files` — scans `.py` files for uppercase IOCTL const assignments, `DeviceIoControl(…, literal, …)` calls, and Win32 device path strings in raw/escaped literals; `standalone_poc_ioctl` INFO finding category; 15 smoke-tests pass) |
 | 2.4 | `weak_prng_in_security_path` UI/keyboard exclusion filter | 1-2h | ✅ done 2026-05-14 (`_KEY_UI_DENYLIST` in `crypto.py`; suppresses IsItemKeyFocused-class matches; commit `8d4c8b1`) |
 | 2.5 | `chains.ue5_prng_cookie_amplification` context discriminator | 1-2h | ✅ done 2026-05-14 (`min_per_primitive={"weak_prng_in_security_path": 3}` + field in `ChainPattern`; commit `8d4c8b1`) |
 | 2.6 | explorer.exe `rpc_hosted_toctou_cooccurrence` triage | — | ✅ **TRIAGED 2026-05-13** — FP at exploitation-grade. TOCTOU is in `CLogonTaskFramework::s_WriteOutOOBEDataForOEMApp`; SDDL findings are KR/GR read-only grants (not write-enabling). Root causes closed by 2.7 + 2.8. |
 | 2.7 | SDDL detector — read-only World grant false-positive | 1-2h | ✅ done 2026-05-14 (read-only carve-out extended to all overbroad principals; GR/KR grants on WD/BU → neutral; write/create rights still fire; commit `8d4c8b1`) |
 | 2.8 | composition.py `rpc_hosted_toctou_cooccurrence` description fix | 1h | ✅ done 2026-05-13 (`_classify_lpe_shape()` discriminator; `lpe_class` field in finding details) |
+| 2.9 | `race.py` v2 — SSA path-variable validation; confirm check-then-use on the same MLIL SSA var before emitting `toctou`; eliminates FP class where check and use operate on different vars (different file/handle, coincidentally similar name) | 1-2 days | ✅ done 2026-05-14 (`_ssa_var_str` now includes Variable.identifier alongside name+version; same-named stripped locals at different stack offsets get distinct root keys; existing toctou TP tests preserved) |
+| 2.10 | `taint.py` indirect call following — propagate taint through vtable and function-pointer dispatch (currently missed entirely); required for accurate taint chains in C++ services and COM servers | 1-2 days | ✅ done 2026-05-14 (`_resolve_indirect_call_targets` via Binja PossibleValueSet on call dest; `_propagate_into_callee` loops over direct+indirect candidates; silently skips when value analysis can't resolve) |
+| 2.11 | `trusted_path.py` v3 — computed/registry/env-var path resolution; current v2 back-walk handles literal `wchar_t*` constants only; registry reads and env-var expansions bypass the check | 1 day | ✅ done 2026-05-14 (`find_trusted_path_computed_load` OUT-param stack-slot tracker; detects RegQueryValueEx/GetEnvironmentVariable/GetTempPath/SHGetFolderPath/PathCombine/etc. filling the same slot as the load-API path arg; new `trusted_path_computed_load` HIGH category; `analyze()` returns v2+v3 combined, v1 suppressed when either fires) |
+
+## Tier 3 — Infrastructure / Phase 5 implementation
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| 4.1 | `differ.py` / `patch.py` Phase 5 real implementation — currently dead scaffold (`NotImplementedError` stubs); blocks the Patch-Tuesday diff-then-triage workflow; requires binary diffing integration (BinDiff or Binja's own differ API) and patch-delta taint seeding | 2-3 days | Open |
 
 ## Sprint log
 
@@ -65,7 +71,7 @@ follow-on, not session-scope): `uninit`, `types`, `race`,
 
 **Sprint 4:** NightmareEclipse §0–§11 (RPC walker, NDR v2/v3b, cloud_files detector, composition v1+rpc_callable_cloud_stall, Windows-lab harness, BlueHammer/RedSun/UnDefend PoC runs, §10 comparison, §11 post-mortem). Also: FP fixes 2.4/2.5/2.7, composition v2 cross-binary reachability (1.7), gate-6 docs 1.6. 154 tests total. ✅ Done 2026-05-14.
 
-**Sprint 5 (active):** Tier 2.2 (IOCTL decimal parsing) + 2.3 (K7 PoC parsing). Optional: NE.8b RedSun IMPACT_VERIFIED via Cloud Files. Tier 3 deferred unless engagement requires source-aware analysis.
+**Sprint 5 (complete):** 2.9/2.10/2.11/2.2/2.3 ✅ done 2026-05-14. Optional: NE.8b RedSun IMPACT_VERIFIED via Cloud Files. Backlog: 0.4 (Gate-6 doc completion), 4.1 (differ/patch Phase 5). Tier 3 deferred unless engagement requires source-aware analysis.
 
 ## Promotion-gate dependencies
 

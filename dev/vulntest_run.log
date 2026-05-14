@@ -1,0 +1,425 @@
+Argus vulntest/runner — binja python: C:\Program Files\Vector35\BinaryNinja\python
+Root: D:\Repos\Security\Argus\vulntest
+Cells: 58
+
+=== known-positive\CVE-2021-21551 ===
+  vuln  D:\Repos\Security\Argus\vulntest\known-positive\CVE-2021-21551\binary\dbutil_2_3.sys
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        33 findings in 6.82s  {'tainted_pointer_dereference': 29, 'kernel_driver_irp_dispatch': 1, 'kernel_driver_primitive_candidate_arbitrary_kernel_rw': 1, 'kernel_arbitrary_rw_primitive': 1, 'kernel_irp_handler_registered': 1}
+
+=== known-positive\CVE-2026-31431 ===
+  vuln  D:\Repos\Security\Argus\vulntest\known-positive\CVE-2026-31431\binary\authencesn.ko
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        10 findings in 0.62s  {'kernel_oob_write_at_offset': 6, 'off_by_one': 2, 'decrypt_into_external_pages_candidate': 1, 'decrypt_into_external_pages': 1}
+
+=== tier1-single\apc-injection\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\apc-injection\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        5 findings in 5.91s  {'format_string': 3, 'apc_injection_local': 1, 'apc_injection': 1}
+
+=== tier1-single\api-hash-resolution\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\api-hash-resolution\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        12 findings in 4.06s  {'off_by_one': 8, 'format_string': 3, 'api_hash_resolution': 1}
+
+=== tier1-single\command-injection\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\command-injection\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        15 findings in 3.18s  {'off_by_one': 8, 'command_injection': 3, 'format_string': 3, 'trusted_path_cache_load': 1}
+
+=== tier1-single\command-injection\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\command-injection\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        6 findings in 3.11s  {'format_string': 3, 'command_injection': 2, 'trusted_path_cache_load': 1}
+
+=== tier1-single\decrypt-external-pages\c ===
+
+=== tier1-single\deserialization\csharp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\deserialization\csharp\build\vuln.dll
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        2 findings in 2.8s  {'insecure_deserialization': 1, 'chain_pattern': 1}
+
+=== tier1-single\deserialization\go ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\deserialization\go\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        269 findings in 173.34s  {'off_by_one': 254, 'lcg_xor_cipher': 4, 'api_hash_resolution': 3, 'mt19937_use': 2, 'stream_cipher_marker': 2, 'ntdll_function_string': 1}
+
+=== tier1-single\deserialization\rust ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\deserialization\rust\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        75 findings in 21.94s  {'type_confusion': 43, 'off_by_one': 16, 'tainted_pointer_dereference': 7, 'chain_pattern': 2, 'ntdll_function_string': 1, 'ssn_resolution_helpers': 1}
+
+=== tier1-single\direct-syscall\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\direct-syscall\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        6 findings in 1.2s  {'direct_syscall_stub': 1, 'ntdll_function_string': 1, 'ssn_resolution_helpers': 1, 'heap_buffer_overflow': 1, 'format_string': 1, 'off_by_one': 1}
+
+=== tier1-single\double-free\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\double-free\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        4 findings in 1.09s  {'format_string': 3, 'double_free': 1}
+
+=== tier1-single\double-free\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\double-free\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        6 findings in 1.43s  {'format_string': 3, 'double_free': 2, 'unchecked_allocation': 1}
+
+=== tier1-single\format-string\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\format-string\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        13 findings in 1.92s  {'off_by_one': 8, 'format_string': 5}
+
+=== tier1-single\format-string\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\format-string\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        15 findings in 2.34s  {'off_by_one': 8, 'format_string': 4, 'type_confusion_candidate': 1, 'type_confusion': 1, 'chain_pattern': 1}
+
+=== tier1-single\heap-overflow\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\heap-overflow\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        13 findings in 1.97s  {'off_by_one': 8, 'format_string': 3, 'heap_buffer_overflow': 2}
+
+=== tier1-single\heap-overflow\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\heap-overflow\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        6 findings in 1.35s  {'format_string': 3, 'unchecked_allocation': 1, 'use_after_free': 1, 'heap_buffer_overflow': 1}
+
+=== tier1-single\hidden-thread\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\hidden-thread\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        6 findings in 1.08s  {'format_string': 3, 'ntdll_function_string': 1, 'ssn_resolution_helpers': 1, 'hidden_from_debugger_thread': 1}
+
+=== tier1-single\integer-overflow\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\integer-overflow\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        6 findings in 1.07s  {'format_string': 3, 'integer_overflow_to_allocation': 1, 'tainted_pointer_dereference': 1, 'unchecked_allocation': 1}
+
+=== tier1-single\integer-overflow\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\integer-overflow\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        6 findings in 1.38s  {'format_string': 3, 'integer_overflow_to_allocation': 1, 'tainted_pointer_dereference': 1, 'unchecked_allocation': 1}
+
+=== tier1-single\iv-reuse\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\iv-reuse\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        2 findings in 1.48s  {'iv_reuse': 1, 'off_by_one': 1}
+  clean D:\Repos\Security\Argus\vulntest\tier1-single\iv-reuse\c\remediation\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        3 findings in 1.3s  {'csprng_use': 2, 'off_by_one': 1}
+
+=== tier1-single\lcg-xor-cipher\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\lcg-xor-cipher\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        19 findings in 2.03s  {'off_by_one': 8, 'lcg_xor_cipher': 4, 'format_string': 3, 'lcg_constants': 2, 'weak_prng_in_security_path': 1, 'chain_pattern': 1}
+
+=== tier1-single\lcg-xor-cipher\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\lcg-xor-cipher\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        12 findings in 1.34s  {'lcg_xor_cipher': 4, 'format_string': 3, 'lcg_constants': 2, 'weak_prng_in_security_path': 2, 'chain_pattern': 1}
+
+=== tier1-single\null-dacl\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\null-dacl\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        2 findings in 1.16s  {'null_dacl': 1, 'off_by_one': 1}
+  clean D:\Repos\Security\Argus\vulntest\tier1-single\null-dacl\c\remediation\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        1 findings in 1.15s  {'off_by_one': 1}
+
+=== tier1-single\off-by-one\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\off-by-one\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        13 findings in 2.1s  {'off_by_one': 9, 'format_string': 3, 'uninitialised_memory_disclosure': 1}
+
+=== tier1-single\off-by-one\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\off-by-one\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        4 findings in 1.23s  {'format_string': 3, 'off_by_one': 1}
+
+=== tier1-single\path-traversal\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\path-traversal\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        15 findings in 2.04s  {'off_by_one': 8, 'path_traversal': 3, 'format_string': 3, 'uninitialised_memory_disclosure': 1}
+
+=== tier1-single\path-traversal\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\path-traversal\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        5 findings in 2.17s  {'format_string': 3, 'path_traversal': 2}
+  [error] D:\Repos\Security\Argus\vulntest\tier1-single\peb-antidebug\c\expected.json: JSONDecodeError: Expecting ',' delimiter: line 24 column 55 (char 813)
+
+=== tier1-single\permissive-sddl\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\permissive-sddl\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        2 findings in 1.15s  {'permissive_sddl': 1, 'off_by_one': 1}
+  clean D:\Repos\Security\Argus\vulntest\tier1-single\permissive-sddl\c\remediation\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        1 findings in 1.14s  {'off_by_one': 1}
+
+=== tier1-single\pre-verify-write\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\pre-verify-write\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        6 findings in 1.2s  {'path_traversal': 3, 'pre_verification_write': 1, 'missing_cleanup_on_failure': 1, 'off_by_one': 1}
+  clean D:\Repos\Security\Argus\vulntest\tier1-single\pre-verify-write\c\remediation\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        4 findings in 1.35s  {'path_traversal': 3, 'off_by_one': 1}
+
+=== tier1-single\prng-security-path\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\prng-security-path\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        9 findings in 1.18s  {'non_csprng_use': 2, 'weak_prng_in_security_path': 2, 'csprng_absent': 1, 'low_entropy_prng_seed': 1, 'format_string': 1, 'off_by_one': 1}
+  clean D:\Repos\Security\Argus\vulntest\tier1-single\prng-security-path\c\remediation\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        4 findings in 1.18s  {'csprng_use': 2, 'format_string': 1, 'off_by_one': 1}
+
+=== tier1-single\prng-security-path\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\prng-security-path\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        17 findings in 2.37s  {'type_confusion': 7, 'off_by_one': 4, 'mt19937_use': 2, 'chain_pattern': 2, 'weak_prng_in_security_path': 1, 'type_confusion_candidate': 1}
+  clean D:\Repos\Security\Argus\vulntest\tier1-single\prng-security-path\cpp\remediation\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        13 findings in 2.25s  {'type_confusion': 7, 'off_by_one': 4, 'type_confusion_candidate': 1, 'chain_pattern': 1}
+
+=== tier1-single\seh-veh-abuse\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\seh-veh-abuse\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        4 findings in 1.9s  {'format_string': 2, 'veh_handler_install': 1, 'off_by_one': 1}
+
+=== tier1-single\stack-overflow\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\stack-overflow\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        14 findings in 2.47s  {'off_by_one': 8, 'format_string': 3, 'banned_function': 1, 'stack_buffer_overflow': 1, 'chain_pattern': 1}
+
+=== tier1-single\stack-overflow\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\stack-overflow\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        5 findings in 1.26s  {'format_string': 3, 'stack_buffer_overflow': 1, 'chain_pattern': 1}
+
+=== tier1-single\stack-overflow\csharp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\stack-overflow\csharp\build\vuln.dll
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        0 findings in 1.0s  {}
+
+=== tier1-single\stack-overflow\go ===
+
+=== tier1-single\stack-overflow\rust ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\stack-overflow\rust\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        61 findings in 18.31s  {'type_confusion': 35, 'off_by_one': 13, 'tainted_pointer_dereference': 7, 'ntdll_function_string': 1, 'ssn_resolution_helpers': 1, 'veh_handler_install': 1}
+
+=== tier1-single\tls-callback\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\tls-callback\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        12 findings in 1.88s  {'off_by_one': 8, 'format_string': 3, 'tls_callback_first_stage': 1}
+
+=== tier1-single\toctou\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\toctou\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        16 findings in 1.84s  {'off_by_one': 8, 'path_traversal': 3, 'format_string': 3, 'uninitialised_memory_disclosure': 1, 'toctou': 1}
+
+=== tier1-single\toctou\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\toctou\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        9 findings in 2.02s  {'toctou': 4, 'format_string': 3, 'path_traversal': 2}
+
+=== tier1-single\trusted-path-xref\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\trusted-path-xref\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        4 findings in 1.06s  {'trusted_path_xref_to_load': 2, 'path_traversal': 1, 'off_by_one': 1}
+  clean D:\Repos\Security\Argus\vulntest\tier1-single\trusted-path-xref\c\remediation\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        2 findings in 1.05s  {'path_traversal': 1, 'off_by_one': 1}
+
+=== tier1-single\type-confusion\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        14 findings in 1.79s  {'off_by_one': 8, 'format_string': 3, 'tainted_pointer_dereference': 1, 'type_confusion': 1, 'chain_pattern': 1}
+
+=== tier1-single\type-confusion\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        9 findings in 1.34s  {'format_string': 3, 'unchecked_allocation': 2, 'type_confusion': 2, 'type_confusion_candidate': 1, 'chain_pattern': 1}
+
+=== tier1-single\type-confusion\csharp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\csharp\build\vuln.dll
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        0 findings in 0.74s  {}
+
+=== tier1-single\type-confusion\go ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\go\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        186 findings in 87.28s  {'off_by_one': 173, 'lcg_xor_cipher': 4, 'api_hash_resolution': 3, 'mt19937_use': 2, 'stream_cipher_marker': 2, 'ntdll_function_string': 1}
+
+=== tier1-single\type-confusion\rust ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\rust\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        56 findings in 7.47s  {'type_confusion': 37, 'off_by_one': 13, 'ntdll_function_string': 1, 'ssn_resolution_helpers': 1, 'veh_handler_install': 1, 'uninitialised_memory_disclosure': 1}
+
+=== tier1-single\uninit-mem-disclosure\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\uninit-mem-disclosure\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        4 findings in 0.96s  {'format_string': 3, 'uninitialised_memory_disclosure': 1}
+
+=== tier1-single\uninit-mem-disclosure\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\uninit-mem-disclosure\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        4 findings in 0.94s  {'format_string': 3, 'uninitialised_memory_disclosure': 1}
+
+=== tier1-single\use-after-free\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        13 findings in 1.83s  {'off_by_one': 8, 'format_string': 3, 'use_after_free': 1, 'unchecked_allocation': 1}
+
+=== tier1-single\use-after-free\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        5 findings in 1.27s  {'format_string': 3, 'unchecked_allocation': 1, 'use_after_free': 1}
+
+=== tier1-single\use-after-free\csharp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\csharp\build\vuln.dll
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        0 findings in 0.76s  {}
+
+=== tier1-single\use-after-free\go ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\go\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        186 findings in 84.86s  {'off_by_one': 173, 'lcg_xor_cipher': 4, 'api_hash_resolution': 3, 'mt19937_use': 2, 'stream_cipher_marker': 2, 'ntdll_function_string': 1}
+
+=== tier1-single\use-after-free\rust ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\rust\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        56 findings in 30.17s  {'type_confusion': 37, 'off_by_one': 13, 'ntdll_function_string': 1, 'ssn_resolution_helpers': 1, 'veh_handler_install': 1, 'uninitialised_memory_disclosure': 1}
+
+=== tier2-chains\eac-permissive-prewrite-cleanup-cache\c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier2-chains\eac-permissive-prewrite-cleanup-cache\c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        7 findings in 2.01s  {'permissive_sddl': 1, 'pre_verification_write': 1, 'missing_cleanup_on_failure': 1, 'trusted_path_xref_to_load': 1, 'path_traversal': 1, 'off_by_one': 1}
+
+=== tier2-chains\ue5-prng-cookie-amplification\cpp ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier2-chains\ue5-prng-cookie-amplification\cpp\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        18 findings in 3.64s  {'type_confusion': 7, 'off_by_one': 4, 'mt19937_use': 2, 'weak_prng_in_security_path': 2, 'chain_pattern': 2, 'type_confusion_candidate': 1}
+
+=== tier3-obfuscated\strip-stack-overflow-c ===
+  vuln  D:\Repos\Security\Argus\vulntest\tier3-obfuscated\strip-stack-overflow-c\build\vuln.exe
+      [warn] linux_exploit: TypeError: analyze() got an unexpected keyword argument 'arch'
+        14 findings in 3.54s  {'off_by_one': 8, 'format_string': 3, 'banned_function': 1, 'stack_buffer_overflow': 1, 'chain_pattern': 1}
+
+=== summary ===
+  NOTE  known-positive\CVE-2021-21551: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\known-positive\CVE-2021-21551\remediation\build\vuln.exe
+  PASS  known-positive\CVE-2021-21551  kernel_irp_handler_registered: PASS
+  PASS  known-positive\CVE-2021-21551  kernel_arbitrary_rw_primitive: PASS
+  PASS  known-positive\CVE-2021-21551  tainted_pointer_dereference: PASS
+  NOTE  known-positive\CVE-2026-31431: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\known-positive\CVE-2026-31431\remediation\build\vuln.exe
+  PASS  known-positive\CVE-2026-31431  kernel_oob_write_at_offset: PASS
+  FAIL  known-positive\CVE-2026-31431  in_place_aead_chained_dst: FAIL-missing-on-vuln
+  NOTE  tier1-single\apc-injection\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\apc-injection\c\remediation\build\vuln.exe
+  PASS  tier1-single\apc-injection\c  apc_injection: PASS
+  NOTE  tier1-single\api-hash-resolution\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\api-hash-resolution\c\remediation\build\vuln.exe
+  PASS  tier1-single\api-hash-resolution\c  api_hash_resolution: PASS
+  NOTE  tier1-single\command-injection\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\command-injection\c\remediation\build\vuln.exe
+  PASS  tier1-single\command-injection\c  command_injection: PASS
+  NOTE  tier1-single\command-injection\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\command-injection\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\command-injection\cpp  command_injection: PASS
+  NOTE  tier1-single\decrypt-external-pages\c: ERROR: vuln binary missing under D:\Repos\Security\Argus\vulntest\tier1-single\decrypt-external-pages\c
+  FAIL  tier1-single\decrypt-external-pages\c  decrypt_into_external_pages_candidate: FAIL-no-binary
+  NOTE  tier1-single\deserialization\csharp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\deserialization\csharp\remediation\build\vuln.exe
+  PASS  tier1-single\deserialization\csharp  insecure_deserialization: PASS
+  NOTE  tier1-single\deserialization\go: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\deserialization\go\remediation\build\vuln.exe
+  PASS  tier1-single\deserialization\go  insecure_deserialization: PASS
+  NOTE  tier1-single\deserialization\rust: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\deserialization\rust\remediation\build\vuln.exe
+  PASS  tier1-single\deserialization\rust  insecure_deserialization: PASS
+  NOTE  tier1-single\direct-syscall\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\direct-syscall\c\remediation\build\vuln.exe
+  PASS  tier1-single\direct-syscall\c  direct_syscall_stub: PASS
+  NOTE  tier1-single\double-free\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\double-free\c\remediation\build\vuln.exe
+  PASS  tier1-single\double-free\c  double_free: PASS
+  NOTE  tier1-single\double-free\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\double-free\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\double-free\cpp  double_free: PASS
+  NOTE  tier1-single\format-string\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\format-string\c\remediation\build\vuln.exe
+  PASS  tier1-single\format-string\c  format_string: PASS
+  NOTE  tier1-single\format-string\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\format-string\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\format-string\cpp  format_string: PASS
+  NOTE  tier1-single\heap-overflow\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\heap-overflow\c\remediation\build\vuln.exe
+  PASS  tier1-single\heap-overflow\c  heap_buffer_overflow: PASS
+  NOTE  tier1-single\heap-overflow\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\heap-overflow\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\heap-overflow\cpp  heap_buffer_overflow: PASS
+  NOTE  tier1-single\hidden-thread\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\hidden-thread\c\remediation\build\vuln.exe
+  PASS  tier1-single\hidden-thread\c  hidden_from_debugger_thread: PASS
+  NOTE  tier1-single\integer-overflow\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\integer-overflow\c\remediation\build\vuln.exe
+  PASS  tier1-single\integer-overflow\c  integer_overflow_to_allocation: PASS
+  NOTE  tier1-single\integer-overflow\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\integer-overflow\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\integer-overflow\cpp  integer_overflow_to_allocation: PASS
+  PASS  tier1-single\iv-reuse\c  iv_reuse: PASS
+  NOTE  tier1-single\lcg-xor-cipher\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\lcg-xor-cipher\c\remediation\build\vuln.exe
+  PASS  tier1-single\lcg-xor-cipher\c  lcg_xor_cipher: PASS
+  NOTE  tier1-single\lcg-xor-cipher\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\lcg-xor-cipher\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\lcg-xor-cipher\cpp  lcg_xor_cipher: PASS
+  PASS  tier1-single\null-dacl\c  null_dacl: PASS
+  NOTE  tier1-single\off-by-one\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\off-by-one\c\remediation\build\vuln.exe
+  PASS  tier1-single\off-by-one\c  off_by_one: PASS
+  NOTE  tier1-single\off-by-one\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\off-by-one\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\off-by-one\cpp  off_by_one: PASS
+  NOTE  tier1-single\path-traversal\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\path-traversal\c\remediation\build\vuln.exe
+  PASS  tier1-single\path-traversal\c  path_traversal: PASS
+  NOTE  tier1-single\path-traversal\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\path-traversal\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\path-traversal\cpp  path_traversal: PASS
+  PASS  tier1-single\permissive-sddl\c  permissive_sddl: PASS
+  PASS  tier1-single\pre-verify-write\c  pre_verification_write: PASS
+  PASS  tier1-single\prng-security-path\c  weak_prng_in_security_path: PASS
+  PASS  tier1-single\prng-security-path\cpp  weak_prng_in_security_path: PASS
+  NOTE  tier1-single\seh-veh-abuse\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\seh-veh-abuse\c\remediation\build\vuln.exe
+  PASS  tier1-single\seh-veh-abuse\c  veh_handler_install: PASS
+  NOTE  tier1-single\stack-overflow\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\stack-overflow\c\remediation\build\vuln.exe
+  PASS  tier1-single\stack-overflow\c  stack_buffer_overflow: PASS
+  NOTE  tier1-single\stack-overflow\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\stack-overflow\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\stack-overflow\cpp  stack_buffer_overflow: PASS
+  NOTE  tier1-single\stack-overflow\csharp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\stack-overflow\csharp\remediation\build\vuln.exe
+  FAIL  tier1-single\stack-overflow\csharp  stack_buffer_overflow: FAIL-missing-on-vuln
+  NOTE  tier1-single\stack-overflow\go: ERROR: vuln binary missing under D:\Repos\Security\Argus\vulntest\tier1-single\stack-overflow\go
+  FAIL  tier1-single\stack-overflow\go  stack_buffer_overflow: FAIL-no-binary
+  NOTE  tier1-single\stack-overflow\rust: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\stack-overflow\rust\remediation\build\vuln.exe
+  FAIL  tier1-single\stack-overflow\rust  stack_buffer_overflow: FAIL-missing-on-vuln
+  NOTE  tier1-single\tls-callback\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\tls-callback\c\remediation\build\vuln.exe
+  PASS  tier1-single\tls-callback\c  tls_callback_first_stage: PASS
+  NOTE  tier1-single\toctou\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\toctou\c\remediation\build\vuln.exe
+  PASS  tier1-single\toctou\c  toctou: PASS
+  NOTE  tier1-single\toctou\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\toctou\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\toctou\cpp  toctou: PASS
+  PASS  tier1-single\trusted-path-xref\c  trusted_path_xref_to_load: PASS
+  NOTE  tier1-single\type-confusion\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\c\remediation\build\vuln.exe
+  PASS  tier1-single\type-confusion\c  type_confusion: PASS
+  NOTE  tier1-single\type-confusion\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\type-confusion\cpp  type_confusion: PASS
+  NOTE  tier1-single\type-confusion\csharp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\csharp\remediation\build\vuln.exe
+  FAIL  tier1-single\type-confusion\csharp  type_confusion: FAIL-missing-on-vuln
+  NOTE  tier1-single\type-confusion\go: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\go\remediation\build\vuln.exe
+  FAIL  tier1-single\type-confusion\go  type_confusion: FAIL-missing-on-vuln
+  NOTE  tier1-single\type-confusion\rust: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\type-confusion\rust\remediation\build\vuln.exe
+  PASS  tier1-single\type-confusion\rust  type_confusion: PASS
+  NOTE  tier1-single\uninit-mem-disclosure\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\uninit-mem-disclosure\c\remediation\build\vuln.exe
+  PASS  tier1-single\uninit-mem-disclosure\c  uninitialised_memory_disclosure: PASS
+  NOTE  tier1-single\uninit-mem-disclosure\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\uninit-mem-disclosure\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\uninit-mem-disclosure\cpp  uninitialised_memory_disclosure: PASS
+  NOTE  tier1-single\use-after-free\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\c\remediation\build\vuln.exe
+  PASS  tier1-single\use-after-free\c  use_after_free: PASS
+  NOTE  tier1-single\use-after-free\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\cpp\remediation\build\vuln.exe
+  PASS  tier1-single\use-after-free\cpp  use_after_free: PASS
+  NOTE  tier1-single\use-after-free\csharp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\csharp\remediation\build\vuln.exe
+  FAIL  tier1-single\use-after-free\csharp  use_after_dispose: FAIL-missing-on-vuln
+  NOTE  tier1-single\use-after-free\go: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\go\remediation\build\vuln.exe
+  FAIL  tier1-single\use-after-free\go  use_after_free: FAIL-missing-on-vuln
+  NOTE  tier1-single\use-after-free\rust: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier1-single\use-after-free\rust\remediation\build\vuln.exe
+  FAIL  tier1-single\use-after-free\rust  use_after_free: FAIL-missing-on-vuln
+  NOTE  tier2-chains\eac-permissive-prewrite-cleanup-cache\c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier2-chains\eac-permissive-prewrite-cleanup-cache\c\remediation\build\vuln.exe
+  PASS  tier2-chains\eac-permissive-prewrite-cleanup-cache\c  permissive_sddl: PASS
+  PASS  tier2-chains\eac-permissive-prewrite-cleanup-cache\c  pre_verification_write: PASS
+  PASS  tier2-chains\eac-permissive-prewrite-cleanup-cache\c  missing_cleanup_on_failure: PASS
+  PASS  tier2-chains\eac-permissive-prewrite-cleanup-cache\c  trusted_path_xref_to_load: PASS
+  PASS  tier2-chains\eac-permissive-prewrite-cleanup-cache\c  chain_pattern: PASS
+  NOTE  tier2-chains\ue5-prng-cookie-amplification\cpp: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier2-chains\ue5-prng-cookie-amplification\cpp\remediation\build\vuln.exe
+  PASS  tier2-chains\ue5-prng-cookie-amplification\cpp  weak_prng_in_security_path: PASS
+  PASS  tier2-chains\ue5-prng-cookie-amplification\cpp  chain_pattern: PASS
+  NOTE  tier3-obfuscated\strip-stack-overflow-c: WARN: clean control missing: D:\Repos\Security\Argus\vulntest\tier3-obfuscated\strip-stack-overflow-c\remediation\build\vuln.exe
+  PASS  tier3-obfuscated\strip-stack-overflow-c  stack_buffer_overflow: PASS
+  FAIL  tier3-obfuscated\strip-stack-overflow-c  obfuscation_marker: FAIL-missing-on-vuln
+
+55 pass, 0 warn, 13 fail
+ail

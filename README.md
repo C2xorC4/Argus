@@ -69,6 +69,40 @@ April–May 2026:
   (`verify/local.py`) executes it and records the impact evidence.
   The local harness mirrors the SSH-driven Linux sanitizer; the
   state-machine bridge consumes both interchangeably.
+- **Windows Defender surface analysis (NightmareEclipse, 2026-05-12/13):**
+  Argus independently surfaced the structural anchors of the Nightmare-Eclipse
+  Windows Defender privilege-escalation bug class — `MpIsPathSymlink` TOCTOU +
+  `MpComInitializeSecurity` permissive SDDL composition — against `MpSvc.dll`
+  without operator-supplied hints. Drove three Argus enhancements:
+  `analysis/rpc_interface.py` NDR v3 (MIDL format-string walk, FC_RP/FC_UP
+  pointer-chain following, `remote_callable_path_method` emission per
+  path-taking RPC method — `ServerMpUpdateEngineSignature` proc_idx=42
+  identified as BlueHammer entry), `analysis/cloud_files.py` (Cloud Files API
+  callback-stall detector — BlueHammer stall shape + RedSun write-proxy shape;
+  generalises to any service binary adjacent to a privileged write path), and
+  `analysis/composition.py` additions (`rpc_callable_path_toctou HIGH` +
+  `rpc_callable_cloud_stall MEDIUM` cross-detector rules). `verify/remote_chain.py`
+  extends Phase 4 to Windows-lab SSH/WinRM targets (stub-verified against HMDXIN).
+  Three chain PoCs (BlueHammer/RedSun/UnDefend) are at stub stage; live
+  IMPACT_VERIFIED runs against HMDXIN are the next gate.
+- **Sprint 5 detector hardening (2026-05-14):** five detector improvements
+  across the Phase-1 analysis stack. `race.py` v2 (`Variable.identifier`-keyed
+  SSA root eliminates the false-positive class where stripped local variables
+  with the same display name `var_N` falsely match as "same path" in TOCTOU
+  detection). `taint.py` indirect-call following (`_resolve_indirect_call_targets`
+  via Binja `PossibleValueSet` — taint now propagates through vtable and
+  function-pointer dispatch when value analysis can determine the callee).
+  `trusted_path.py` v3 (`find_trusted_path_computed_load` — OUT-parameter stack
+  slot tracker for `RegQueryValueEx`, `GetEnvironmentVariable`, `GetTempPath`,
+  `SHGetFolderPath`, `PathCombine` and similar, emits `trusted_path_computed_load`
+  HIGH when a registry/env-var-sourced buffer is passed to a load API callsite).
+  `source_surface.py` IOCTL coverage expanded: decimal literals and
+  signed-negative (IDA decompiler output), `switch(IoControlCode){case:}` block
+  extraction, `CTL_CODE(dev,fn,method,access)` macro decoding from headers.
+  K7-style standalone PoC parsing added: Python ctypes PoC files scanned for
+  IOCTL constant definitions, `DeviceIoControl` call literals, and Win32 device
+  path strings — emits `standalone_poc_ioctl` INFO findings with driver-target
+  context for cross-referencing against Phase-1 findings.
 
 The four-state finding lifecycle —
 **DETECTED → CONFIRMED → IMPACT_PENDING → IMPACT_VERIFIED ≡ PROVEN** —
@@ -255,9 +289,9 @@ Methodology reference:
 |---|---|---|
 | 0 | Architecture + shared infrastructure | **Done** (2026-04-30) |
 | 1 | Identification stage rebase (heuristics + analysis modules + malware-analyzer + vuln-class-analyzer + manual-workflow docs) | **Substantially complete** — 14 heuristics + 24 analysis modules; Phase 1++ E1-E7 BYOVD detection (13/13 multi-driver sweep); Run-14 per-seed visited tracking; Tier-2 foundational classes; Plans A-D + integrity_check_order v4 (verify-call-presence) + cleanup_dominance v2 + trusted_path detectors; Sprint 3/4 lineup hardening (cross-function heap, off-by-one, dynamic sink-arg, evasion structures, tagged-union, managed/Go) |
-| 2 | Source-guided / grey-box pipeline | **Substantially complete** (closed 2026-05-07) — three Epic-submission coverage gaps closed: SDDL/ACE, write-then-verify v3 (verify-call-dominates-commit), PRNG provenance (Path A/B/C + IV-reuse + custom-cipher signatures); callee-signature alignment slice |
-| 3 | Exploitation stage | **Complete** (2026-05-11) — chain scaffolding (Primitive + PoC dataclasses, `compose_pocs`, RET/JOP gadget finder, multi-arch shellcode tables, pwntools-style ret2win + egg-hunt templates) PLUS generic per-finding PoC generator `exploit/finding_poc.py` (12 category renderers — stack/heap OF, format string, command injection, path traversal, off-by-one, UAF, double-free, uninit memory disclosure, TOCTOU, trusted-path load, kernel decrypt-external-pages stub). Each renderer emits a deterministic `[+] EXPLOIT RAN` marker the Phase-4 harness greps for. |
-| 4 | Verification stage | **Done** (2026-05-11) — two-path harness: `verify/sanitizer.py` (SSH-driven Linux lab — first IMPACT_VERIFIED transitions on CVE-2026-31431, dirty-frag CVE-2026-43284/43500) and `verify/local.py` (local-subprocess, cross-platform — drives Phase-3 PoCs against userspace targets on the analysis host itself). `vulntest/runner.py` integrates the local harness so a single `--c-cpp-only` pass walks DETECTED → CONFIRMED → IMPACT_PENDING → IMPACT_VERIFIED end-to-end. Latest sweep: 100 IMPACT_VERIFIED transitions across the Windows C/C++ corpus, 28+ cells, 12 bug-class categories. HTB binary-exploitation + rootkit track: 11/11 PROVEN over live VPN. |
+| 2 | Source-guided / grey-box pipeline | **Substantially complete** (closed 2026-05-07) — three Epic-submission coverage gaps closed: SDDL/ACE, write-then-verify v3 (verify-call-dominates-commit), PRNG provenance (Path A/B/C + IV-reuse + custom-cipher signatures); callee-signature alignment slice. Post-NE additions (2026-05-12/13): `analysis/rpc_interface.py` NDR v3 (MIDL_SERVER_INFO walk, FC_RP/FC_UP pointer-chain following into TypeFormatString, transfer-syntax classification, `remote_callable_path_method` emission); `analysis/cloud_files.py` (Cloud Files stall + write-proxy detector); `analysis/composition.py` `rpc_callable_cloud_stall` composition rule |
+| 3 | Exploitation stage | **Complete** (2026-05-11) — chain scaffolding (Primitive + PoC dataclasses, `compose_pocs`, RET/JOP gadget finder, multi-arch shellcode tables, pwntools-style ret2win + egg-hunt templates) PLUS generic per-finding PoC generator `exploit/finding_poc.py` (12 category renderers — stack/heap OF, format string, command injection, path traversal, off-by-one, UAF, double-free, uninit memory disclosure, TOCTOU, trusted-path load, kernel decrypt-external-pages stub). Each renderer emits a deterministic `[+] EXPLOIT RAN` marker the Phase-4 harness greps for. Post-NE addition (2026-05-12): `exploit/chain_poc.py` — multi-process orchestration scaffold for `remote_callable_toctou` findings; renders BlueHammer-class oplock + NT-symlink chain PoCs from composited finding metadata (interface UUID, proc_idx, sentinel path from knowledge entry). |
+| 4 | Verification stage | **Done** (2026-05-11) — two-path harness: `verify/sanitizer.py` (SSH-driven Linux lab — first IMPACT_VERIFIED transitions on CVE-2026-31431, dirty-frag CVE-2026-43284/43500) and `verify/local.py` (local-subprocess, cross-platform — drives Phase-3 PoCs against userspace targets on the analysis host itself). `vulntest/runner.py` integrates the local harness so a single `--c-cpp-only` pass walks DETECTED → CONFIRMED → IMPACT_PENDING → IMPACT_VERIFIED end-to-end. Latest sweep: 100 IMPACT_VERIFIED transitions across the Windows C/C++ corpus, 28+ cells, 12 bug-class categories. HTB binary-exploitation + rootkit track: 11/11 PROVEN over live VPN. Post-NE addition (2026-05-12): `verify/remote_chain.py` — Windows-lab remote harness (SSH to Windows target, PowerShell probing, `Get-WinEvent` Event Log capture, Defender service status before/after, SCP upload); `verify_windows_remote()` + `verify_chain_poc_on_windows()`; stub-verified against HMDXIN; shares `VerificationResult` shape with the SSH Linux variant. |
 | 5 | Triage + Differ + Patcher | **Triage functional** (2026-05-07) — `auto_triage(findings, min_confidence)` promotes DETECTED → CONFIRMED, wired between chain-match and PoC composition. Differ + Patcher scaffolding: dataclasses + skeleton API; full implementations deferred. |
 | 6 | Synthesis + reporting | **Scaffolding shipped** (2026-05-07) — `output/vendor.py` HackerOne / MSRC / Bugcrowd / Epic Games renderers with PROVEN-only emission gate; SARIF + Markdown renderers from Phase 0. |
 
@@ -401,6 +435,10 @@ against the binary itself and remains effective.
 | Chain composition (heuristics/chains.py + ChainPattern.min_primitives) | `heuristics/chains.py:match` — round-trips PoC.to_chain_template_payload() back into ChainPattern | Done |
 | VulnTest harness (cell discovery, vuln/clean diff, hard-sig matcher, substrate-coherence check) | `vulntest/runner.py` + `vulntest/build_all.sh` (MSVC vcvars64) | Done |
 | Clean-corpus FP sweep harness | `dev/clean_corpus_sweep.py` — 15-binary Windows System32 baseline | Done |
+| Windows RPC NDR interface walk (UUID → dispatch table → per-method path-arg type inference) | `analysis/rpc_interface.py` v3 — `_find_midl_server_info` + `type_format_ptr` extraction (pStubDesc+0x40), `_ndr_proc_has_wstring_param` with FC_RP (0x11)/FC_UP (0x12) pointer-chain following into TypeFormatString, transfer-syntax classification (NDR32/NDR64), `remote_callable_path_method (MEDIUM)` per path-taking method. FC_RP→PWSTR fix closes v2 blind spot on `ServerMpUpdateEngineSignature`. Gap: multi-hop FC_RP chains (noted for v4). | Done (NightmareEclipse §3, 2026-05-12/13) |
+| Cloud Files API callback stall (BlueHammer stall shape + RedSun write-proxy shape) | `analysis/cloud_files.py` — `CfRegisterSyncRoot`/`CfConnectSyncRoot`/`CfExecute`/`CfHydratePlaceholder` import detection; emits `cloud_files_import (INFO)` always, escalates to `cloud_files_write_proxy (HIGH)` when co-located with TOCTOU or permissive SDDL. Generalises beyond AV to any service binary adjacent to a privileged write path. | Done (NightmareEclipse post-mortem, 2026-05-13) |
+| Cross-detector composition — TOCTOU + SDDL + RPC + Cloud Files (exploitation-grade composite signals) | `analysis/composition.py` — `rpc_callable_path_toctou (HIGH)`: NDR-confirmed procnum + permissive SDDL + TOCTOU composition; `rpc_callable_cloud_stall (MEDIUM)`: RPC path-method + Cloud Files write-proxy within same binary. Both rules fire on MpSvc.dll. | Done (NightmareEclipse §2/post-mortem, 2026-05-12/13) |
+| Phase 4 verification — Windows remote chain (SSH/WinRM to Windows lab target) | `verify/remote_chain.py` — PowerShell probing, `Get-WinEvent` Event Log capture, Defender service status before/after, SCP upload, `verify_windows_remote()` + `verify_chain_poc_on_windows()`; shares `VerificationResult` with the SSH Linux variant; stub-verified against HMDXIN. | Done (NightmareEclipse §5, 2026-05-12) |
 
 **Sources / sinks** (`heuristics/imports.py`): 45 sources, 98 sinks
 — both supersets of the pre-Argus legacy lists. Includes Win32
@@ -443,14 +481,24 @@ and IPC entries (`accept`, `msgrcv`, `mq_receive`, `shmat`).
 | **HTB binary-exploitation + rootkit track** (Runs 21-XX) | DETECTED + PROVEN | 11/11 challenges solved; 18+ working PoC scripts. Mathematricks (int32 overflow), Racecar (format string / random race), Restaurant (ret2libc two-stage), r0bob1rd (3-stage format-string GOT overwrite), Questionnaire (ret2win), El Teteo / El Mundo / El Pipo / Rocket Blaster XXX / Hunting (ret2shellcode + variable overwrite variants), Cyberpsychosis (diamorphine LKM rootkit — MAGIC_PREFIX = "psychosis", getdents64 hook bypassed via stat-based probing, world-readable flag at `/opt/psychosis/flag.txt`). All exploits run live over VPN. Third-party-graded, time-stamped solves at public Argus HTB profile. |
 | Decrypt-into-externally-owned-pages disclosure target (CVE-2026-43284 esp4/esp6 + CVE-2026-43500 rxrpc) | IMPACT_VERIFIED — framework's generic detector caught the disclosed CVE class organically (2026-05-08) | The pre-existing `analysis/decrypt_external_pages.py` (scatterlist-constructor + crypto-decrypt-sink without privately-own-gate) fired on the disclosure-named call sites — `esp_input`, `esp6_input`, `rxkad_verify_packet_1` — across Ubuntu 24.04 / 6.8.0-111 pre-patch modules, plus 2 sibling-class candidates (`rxkad_decrypt_ticket`, `rxkad_verify_response`). Phase-4 harness ran the public PoC against the lab VM: ESP path corrupted `/usr/bin/su` page cache (entry bytes `31 ff` at 0x78 confirmed; dmesg captured kernel-side `'su' launched '/bin/sh' with NULL argv`); RxRPC path injected `root::0:0:` into `/etc/passwd` page cache (`getent passwd root` returned the empty-password root entry via NSS). State: `esp_input` + `rxkad_verify_packet_1` → IMPACT_VERIFIED, `esp6_input` → IMPACT_PENDING (PoC IPv4-only). Evidence: `vulntest/known-positive/dirty-frag/impact-verification/`. |
 
-**Microsoft accessibility binaries** (utilman / sethc / osk) — used
-as a control set:
+| **Windows Defender — NightmareEclipse** (`MpSvc.dll` / `MpClient.dll` / `MsMpEng.exe`, Defender `4.18.26030.3011-0`, HMDXIN bare-metal lab, 2026-05-12/13) | CONFIRMED; IMPACT_VERIFIED pending NE §7–9 | `rpc_interface.py` NDR v3 enumerated ≥10 IMpService methods; `ServerMpUpdateEngineSignature` (proc_idx=42) identified as path-taking PWSTR method via FC_RP pointer-chain walk. `rpc_callable_path_toctou (HIGH)` fired on `MpIsPathSymlink` TOCTOU + `MpComInitializeSecurity` permissive SDDL composition. `rpc_callable_cloud_stall (MEDIUM)` fired on Cloud Files sync-root adjacency. `chain_poc.py` rendered syntactically valid multi-process orchestration (BlueHammer-class shape, oplock + NT-symlink skeleton). `remote_chain.py` stub-verified against HMDXIN (`impact_verified_evidence=true` on print-sentinel PoC). BlueHammer: post-patch on HMDXIN — PoC expected to reach CONFIRMED-with-patch-mitigation-documented. RedSun + UnDefend: unpatched on HMDXIN — full IMPACT_VERIFIED pending §7–9. |
 
-| Binary | Result |
-|---|---|
-| `utilman.exe` | 3 candidate-grade TOCTOU findings in ATL `StartList::HandleFirstTime` (`GetFileAttributesW` → `DeleteFileW` over `CAtlList<CRegKey>` iteration). Status: requires source-level review; registry-derived path + one-time-setup function suggests but does not prove benign. |
-| `sethc.exe` | 0 findings (CFG-disjoint-branch fix correctly suppressed the phi-merge artefact in `SettingsCopier::DeleteATSettings`). |
-| `osk.exe` | 0 findings. |
+**Control set runs** — clean-corpus FP calibration:
+
+**Accessibility binaries** (utilman / sethc / osk), full pipeline:
+
+| Binary | Findings | Key result |
+|---|---|---|
+| `utilman.exe` | 3 (HIGH TOCTOU) | 3 candidate-grade TOCTOU in ATL `StartList::HandleFirstTime` (`GetFileAttributesW` → `DeleteFileW` at three distinct offsets). No SDDL → no composition → 0.000 exploitability score. Requires source-level review; registry-derived path + one-time-setup context. |
+| `sethc.exe` | 0 | Clean. CFG-disjoint-branch fix correctly suppresses the phi-merge artefact. |
+| `osk.exe` | 0 | Clean. |
+
+**Expanded control set** (2026-05-13 run — first pass with cloud_files + composition modules active):
+
+| Binary | Findings | Key result |
+|---|---|---|
+| `taskmgr.exe` | 153 | 46 `weak_prng_in_security_path` in keyboard/focus-handler functions (`IsItemKeyFocused`, `IsDeleteKeyInvokedInSearch`, `HandleAccessKeyMessages`, etc.) — FP class: "Key" in UI function names triggers security-path gate. `ue5_prng_cookie_amplification` chain fires on the 46-count PRNG set — FP class: chain needs game/UE5 context discriminator to suppress on non-game binaries. 38 `heap_buffer_overflow` + 1 `type_confusion` → `chains.heapof_vtable_rop (CRITICAL)` — pending manual triage. 1 `trusted_path_cache_load (MEDIUM)`. 0 SDDL → no composition. 0 Cloud Files. |
+| `explorer.exe` | 150 | **2 `rpc_hosted_toctou_cooccurrence (MEDIUM)` composite findings** — first non-Defender binary to produce composition output. 2 HIGH TOCTOU + 2 HIGH `permissive_sddl` co-present; same-binary call-graph reachability check fired. Functions TBD (triage pending). `apc_injection_remote (HIGH, 0.700 exploitability)` — `OpenThread + QueueUserAPC`, Early-Bird pattern. 5 CRITICAL `tainted_pointer_dereference`. 0 Cloud Files. |
 
 ## Pre-Argus comparison
 
@@ -484,6 +532,14 @@ from 200.4 s to 117.7 s on this host (different background load
 than the April calibration); the head-to-head ratio is the
 load-bearing number.
 
+2026-05-13 expanded-set run (post-NE modules active — `cloud_files`
++ `composition` wired into validate.py): `taskmgr.exe` (18,329 funcs)
+completed in 199s; `explorer.exe` (8,178 funcs) in 453s. Both are
+larger than the accessibility-binary control set and the timing reflects
+that; the per-finding volume on large binaries exposes two FP classes
+(see to-do) and confirms that Cloud Files detector produces zero noise
+on non-cloud system32 binaries.
+
 The 3 remaining Argus findings on `utilman.exe` are the
 race-detector's TOCTOU triple in ATL `StartList::HandleFirstTime`
 (`GetFileAttributesW` → `DeleteFileW` over `CAtlList<CRegKey>`),
@@ -510,11 +566,12 @@ score, neither of which the legacy pipeline produces.
 | Cross-detector dedup at orchestrator level | `heap.py` and `taint.py` both emit `heap_buffer_overflow` on heap-overflow/c with different `detector` strings. |
 | Plan A V2/conditional ACE handling | Grammar reference now in `Memory/Knowledge/windows_sddl_grammar.md`; parser still v1. |
 | E2 indirect-dispatch beyond `__memfill_u64` | FastIoDispatch tables, PnP-only IRP registration. |
-| Phase 4 Windows-kernel-lab integration | Local-subprocess harness covers Windows userspace (100 IMPACT_VERIFIED across the C/C++ corpus, 2026-05-11). Windows **kernel** verification (e.g. `dbutil_2_3.sys` driver, currently CONFIRMED) still needs a remote-Windows-kernel target plumbed analogously to `verify_remote`. |
+| Multi-process chain PoC verification (Phase 3→4 gap) | `verify/local.py` executes single-process PoCs only. Chain PoCs (BlueHammer/RedSun/UnDefend) require two coordinating processes + oplock/CF callback timing — no local-only verification path exists. These run via `remote_chain.py` against HMDXIN; NightmareEclipse §7–9 are the first consumers of the remote path. |
+| Phase 4 Windows-kernel-lab integration | Local-subprocess harness covers Windows userspace (100 IMPACT_VERIFIED across the C/C++ corpus, 2026-05-11). `remote_chain.py` now covers Windows **userspace** remote targets (HMDXIN, multi-process chains). Windows **kernel** verification (e.g. `dbutil_2_3.sys`, currently CONFIRMED) still needs a separate test-signing–enabled Windows-kernel target plumbed analogously to `verify_remote` — HMDXIN is production-grade Windows, not a kernel debug target. |
 | Per-language detectors (Go gopclntab, Rust DWARF + panic-string anchors, .NET IL walk) | `dotnet_managed.py` v1 is heuristic string co-presence. Multi-lang cells are currently skipped by the local-verify harness (`--c-cpp-only` filter) until per-language detectors can distinguish runtime patterns from real bugs (Go runtime's `<=` comparisons FP into the off-by-one detector, Rust release binaries' large function counts time out under the same detector, etc.). |
 | Linux kernel-module build infrastructure | `vulntest/tier1-single/decrypt-into-external-pages/c` and the dirty-frag fixtures both rely on out-of-tree `.ko` builds; missing toolchain in the fixture corpus blocks any Phase-4 verification driven from inside the repo. The Phase-4 harness already differentiates `verify_remote` (kernel-LPE) vs `verify_local` (userspace) — only the fixtures are missing. |
 | Cross-arch target validation | AArch64, MIPS, RISC-V — verify `heuristics/syscalls.py` cross-arch SVC / ECALL patterns fire correctly. |
-| Expanded Windows control set | `cmd.exe`, `notepad.exe`, `explorer.exe`, `taskmgr.exe`. |
+| Expanded Windows control set — continued | `cmd.exe`, `notepad.exe`. (explorer.exe + taskmgr.exe swept 2026-05-13 — see validation history below.) |
 | Linux ELF control set | `bash`, `coreutils`, `openssl`. |
 | BYOVD-set re-sweep with Tier-2 + Plans A-C | Run 12 covered 13/13 BYOVD drivers for primitives only; foundational classes have not been swept across the same set yet. |
 

@@ -132,9 +132,18 @@ CATEGORY_META = {
 def _ssa_var_str(v) -> str:
     if v is None:
         return ""
-    name = getattr(getattr(v, "var", None), "name", None)
+    var_obj = getattr(v, "var", None)
+    name = getattr(var_obj, "name", None)
     version = getattr(v, "version", None)
     if name is not None and version is not None:
+        # Include the variable's identifier so that two stripped locals
+        # with the same Binja-assigned display name (e.g. both named
+        # "var_8" at different stack offsets) produce different root
+        # keys and do not false-positive match as the same path.
+        ident = (getattr(var_obj, "identifier", None)
+                 or getattr(var_obj, "index", None))
+        if ident is not None:
+            return f"{name}${ident}#{version}"
         return f"{name}#{version}"
     return str(v)
 

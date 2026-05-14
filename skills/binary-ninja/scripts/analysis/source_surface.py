@@ -27,9 +27,12 @@ What the minimal slice does
    When it's ambiguous, skips with a note.
 
 3. **IOCTL constant extraction.** Scans the dispatch handler's source
-   for `IoControlCode == 0xXXXX` patterns, captures the IOCTL constant
-   plus the immediate handler invocation that follows it. Decodes the
-   IOCTL via the `CTL_CODE` macro layout
+   for IOCTL constants via three complementary patterns:
+   (a) `IoControlCode == 0xXXXX` or `IoControlCode == <decimal>` comparisons;
+   (b) `switch(IoControlCode) { case 0x.../decimal: ... }` dispatch blocks;
+   (c) `CTL_CODE(DeviceType, Function, Method, Access)` macro invocations
+   in header/source files — computes the final IOCTL code from components.
+   Decodes each found code via the `CTL_CODE` macro layout
    (`(DeviceType<<16) | (Access<<14) | (Function<<2) | Method`).
 
 4. **Per-IOCTL classification finding.** Emits a `kernel_ioctl_handler_classified`
@@ -108,10 +111,75 @@ _CALL_TOKEN_RE = re.compile(r"\b([A-Z][A-Za-z]*[A-Za-z0-9_]*)\s*\(")
 # (typical Ghidra output for the dispatcher switch) and explicit
 # DeviceIoControl call constants.
 _IOCTL_CMP_RE = re.compile(
-    r"IoControlCode\s*(?:==|!=)\s*(0x[0-9a-fA-F]+)"
+    r"IoControlCode\s*(?:==|!=)\s*(0x[0-9a-fA-F]+|-?\d+)"
 )
 _IOCTL_DIC_RE = re.compile(
-    r"DeviceIoControl\s*\([^,)]+,\s*(0x[0-9a-fA-F]+)"
+    r"DeviceIoControl\s*\([^,)]+,\s*(0x[0-9a-fA-F]+|-?\d+)"
+)
+
+# switch(IoControlCode) { case X: } dispatch blocks.
+_IOCTL_SWITCH_VAR_PAT = (
+    r"IoControlCode|ioControlCode|dwIoControlCode|IoctlCode|ioctlCode"
+    r"|dwCtlCode|IoCtrl|ioCtrl|ulIoControlCode"
+)
+_IOCTL_SWITCH_RE = re.compile(
+    r"\bswitch\s*\(\s*(?:\w+[\.\->]+)*(?:" + _IOCTL_SWITCH_VAR_PAT + r")\s*\)"
+)
+_IOCTL_CASE_RE = re.compile(r"\bcase\s+(0x[0-9a-fA-F]+|-?\d+)\s*:")
+
+# CTL_CODE(...) macro invocations in header / source files.
+_CTL_CODE_RE = re.compile(
+    r"\bCTL_CODE\s*\(\s*"
+    r"(0x[0-9a-fA-F]+|\d+|FILE_DEVICE_\w+)\s*,\s*"
+    r"(0x[0-9a-fA-F]+|\d+)\s*,\s*"
+    r"(METHOD_\w+|\d+)\s*,\s*"
+    r"(FILE_\w+|\d+)"
+    r"\s*\)"
+)
+_CTL_CODE_METHOD_VALS: dict[str, int] = {
+    "METHOD_BUFFERED": 0, "METHOD_IN_DIRECT": 1,
+    "METHOD_OUT_DIRECT": 2, "METHOD_NEITHER": 3,
+}
+_CTL_CODE_ACCESS_VALS: dict[str, int] = {
+    "FILE_ANY_ACCESS": 0, "FILE_SPECIAL_ACCESS": 0,
+    "FILE_READ_ACCESS": 1, "FILE_WRITE_ACCESS": 2,
+    "FILE_READ_WRITE_ACCESS": 3,
+}
+_CTL_CODE_DEVICE_VALS: dict[str, int] = {
+    "FILE_DEVICE_UNKNOWN": 0x22, "FILE_DEVICE_DISK": 0x07,
+    "FILE_DEVICE_KEYBOARD": 0x0B, "FILE_DEVICE_MOUSE": 0x0F,
+    "FILE_DEVICE_NULL": 0x15, "FILE_DEVICE_VIRTUAL_DISK": 0x24,
+    "FILE_DEVICE_KSEC": 0x39, "FILE_DEVICE_FIPS": 0x3A,
+    "FILE_DEVICE_NETWORK": 0x12, "FILE_DEVICE_VIDEO": 0x23,
+    "FILE_DEVICE_BATTERY": 0x29, "FILE_DEVICE_SMARTCARD": 0x31,
+    "FILE_DEVICE_BEEP": 0x01, "FILE_DEVICE_CD_ROM": 0x02,
+    "FILE_DEVICE_CONTROLLER": 0x04, "FILE_DEVICE_DFS": 0x06,
+    "FILE_DEVICE_DISK_FILE_SYSTEM": 0x08, "FILE_DEVICE_FILE_SYSTEM": 0x09,
+    "FILE_DEVICE_NAMED_PIPE": 0x11, "FILE_DEVICE_MASS_STORAGE": 0x2D,
+    "FILE_DEVICE_KS": 0x2F, "FILE_DEVICE_ACPI": 0x32,
+    "FILE_DEVICE_SERENUM": 0x37, "FILE_DEVICE_TERMSRV": 0x38,
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Python PoC patterns (2.3 — K7-style standalone-PoC parsing)
+# ─────────────────────────────────────────────────────────────────
+
+# Uppercase constant assignment: IOCTL_FOO = 0x..., SOME_CODE = decimal.
+_PY_CONST_RE = re.compile(
+    r"^([A-Z][A-Z0-9_]{2,})\s*=\s*(0x[0-9a-fA-F]+|-?\d+)",
+    re.MULTILINE,
+)
+
+# DeviceIoControl call — second arg is the IOCTL code; optional ctypes.c_* wrapper.
+_PY_DIC_RE = re.compile(
+    r"DeviceIoControl\s*\([^,)]+,\s*(?:ctypes\.\w+\s*\(\s*)?(0x[0-9a-fA-F]+|-?\d+)"
+)
+
+# Win32 device path string in Python source (raw literal and escaped literal).
+_PY_DEVICE_PATH_RE = re.compile(
+    r"""r['"]\\{2}\.\\([A-Za-z0-9_]+)"""
+    r"""|"""
+    r"""['"]\\{4}\.\\{2}([A-Za-z0-9_]+)"""
 )
 
 
@@ -297,10 +365,96 @@ def _scan_ue5_source_patterns(text: str, file_path: str
     return out
 
 
+def _parse_ioctl_int(raw: str) -> int:
+    r = raw.strip()
+    if r.startswith(("0x", "0X")):
+        return int(r, 16)
+    return int(r)
+
+
+def _looks_like_ioctl_constant(code: int) -> bool:
+    """True when the masked-32-bit code has a non-zero device_type field."""
+    return bool((code & 0xFFFF0000) and (code & 0xFFFFFFFF))
+
+
+def _scan_ioctl_switch_cases(text: str, file_path: str) -> list[IoctlBinding]:
+    """Extract IOCTL codes from switch(IoControlCode) { case X: } blocks."""
+    out: list[IoctlBinding] = []
+    for m in _IOCTL_SWITCH_RE.finditer(text):
+        brace_pos = text.find("{", m.end())
+        if brace_pos == -1:
+            continue
+        depth = 1
+        i = brace_pos + 1
+        while i < len(text) and depth > 0:
+            c = text[i]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+            i += 1
+        switch_body = text[brace_pos + 1 : i - 1]
+        body_offset = brace_pos + 1
+        for cm in _IOCTL_CASE_RE.finditer(switch_body):
+            try:
+                code = _parse_ioctl_int(cm.group(1)) & 0xFFFFFFFF
+            except (ValueError, OverflowError):
+                continue
+            if not _looks_like_ioctl_constant(code):
+                continue
+            abs_pos = body_offset + cm.start()
+            line = text[:abs_pos].count("\n") + 1
+            ctx = text[max(0, abs_pos - 20):abs_pos + 60].strip()
+            out.append(IoctlBinding(code=code, matched_text=ctx,
+                                    file=file_path, line=line))
+    return out
+
+
+def _scan_ctl_code_macros(text: str, file_path: str) -> list[IoctlBinding]:
+    """Extract IOCTL codes from CTL_CODE(dev, fn, method, access) macros."""
+    out: list[IoctlBinding] = []
+    for m in _CTL_CODE_RE.finditer(text):
+        dev_raw, fn_raw, meth_raw, acc_raw = (m.group(i) for i in range(1, 5))
+        try:
+            dev = (
+                _CTL_CODE_DEVICE_VALS.get(dev_raw)
+                if dev_raw.startswith("FILE_")
+                else _parse_ioctl_int(dev_raw)
+            )
+            if dev is None:
+                continue
+            fn = _parse_ioctl_int(fn_raw)
+            meth = (
+                _CTL_CODE_METHOD_VALS.get(meth_raw)
+                if meth_raw.startswith("METHOD_")
+                else _parse_ioctl_int(meth_raw)
+            )
+            if meth is None:
+                continue
+            acc = (
+                _CTL_CODE_ACCESS_VALS.get(acc_raw)
+                if acc_raw.startswith("FILE_")
+                else _parse_ioctl_int(acc_raw)
+            )
+            if acc is None:
+                continue
+        except (ValueError, KeyError):
+            continue
+        code = ((dev << 16) | (acc << 14) | (fn << 2) | meth) & 0xFFFFFFFF
+        line = text[:m.start()].count("\n") + 1
+        ctx = text[max(0, m.start() - 30):m.end() + 30].strip()
+        out.append(IoctlBinding(code=code, matched_text=ctx,
+                                file=file_path, line=line))
+    return out
+
+
 def _scan_ioctl_bindings(text: str, file_path: str) -> list[IoctlBinding]:
     out: list[IoctlBinding] = []
     for m in _IOCTL_CMP_RE.finditer(text):
-        code = int(m.group(1), 16)
+        try:
+            code = _parse_ioctl_int(m.group(1)) & 0xFFFFFFFF
+        except (ValueError, OverflowError):
+            continue
         line = text[:m.start()].count("\n") + 1
         out.append(IoctlBinding(
             code=code,
@@ -308,14 +462,92 @@ def _scan_ioctl_bindings(text: str, file_path: str) -> list[IoctlBinding]:
             file=file_path, line=line,
         ))
     for m in _IOCTL_DIC_RE.finditer(text):
-        code = int(m.group(1), 16)
+        try:
+            code = _parse_ioctl_int(m.group(1)) & 0xFFFFFFFF
+        except (ValueError, OverflowError):
+            continue
         line = text[:m.start()].count("\n") + 1
         out.append(IoctlBinding(
             code=code,
             matched_text=text[max(0, m.start() - 30):m.end() + 60].strip(),
             file=file_path, line=line,
         ))
+    out.extend(_scan_ioctl_switch_cases(text, file_path))
+    out.extend(_scan_ctl_code_macros(text, file_path))
     return out
+
+
+def _scan_py_poc_bindings(
+    text: str, file_path: str
+) -> tuple[list[IoctlBinding], list[str]]:
+    """Extract IOCTL codes and Win32 device paths from a Python PoC file.
+
+    Returns `(ioctls, device_names)`. IOCTL candidates are filtered
+    through `_looks_like_ioctl_constant` to suppress small integers.
+    """
+    ioctls: list[IoctlBinding] = []
+    devices: list[str] = []
+
+    for m in _PY_DEVICE_PATH_RE.finditer(text):
+        name = m.group(1) or m.group(2) or ""
+        if name:
+            devices.append(name)
+
+    seen: set[int] = set()
+    for m in _PY_CONST_RE.finditer(text):
+        try:
+            code = _parse_ioctl_int(m.group(2)) & 0xFFFFFFFF
+        except (ValueError, OverflowError):
+            continue
+        if not _looks_like_ioctl_constant(code) or code in seen:
+            continue
+        seen.add(code)
+        line = text[:m.start()].count("\n") + 1
+        ioctls.append(IoctlBinding(code=code,
+                                   matched_text=m.group(0).strip(),
+                                   file=file_path, line=line))
+
+    for m in _PY_DIC_RE.finditer(text):
+        try:
+            code = _parse_ioctl_int(m.group(1)) & 0xFFFFFFFF
+        except (ValueError, OverflowError):
+            continue
+        if not _looks_like_ioctl_constant(code) or code in seen:
+            continue
+        seen.add(code)
+        line = text[:m.start()].count("\n") + 1
+        ctx = text[max(0, m.start() - 20):m.end() + 40].strip()
+        ioctls.append(IoctlBinding(code=code, matched_text=ctx,
+                                   file=file_path, line=line))
+
+    return ioctls, devices
+
+
+def parse_poc_files(
+    source_dir: Path,
+) -> tuple[list[IoctlBinding], list[str]]:
+    """Scan Python PoC / exploit files under `source_dir` for IOCTL codes
+    and Win32 device paths (K7-style standalone-PoC pattern).
+
+    Returns `(ioctls, device_names)`. Only `*.py` files are consumed.
+    """
+    ioctls: list[IoctlBinding] = []
+    devices: list[str] = []
+    if not source_dir.exists() or not source_dir.is_dir():
+        return ioctls, devices
+    for path in source_dir.rglob("*.py"):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        rel = (str(path.relative_to(source_dir))
+               if source_dir in path.parents else str(path))
+        py_ioctls, py_devs = _scan_py_poc_bindings(text, rel)
+        ioctls.extend(py_ioctls)
+        devices.extend(py_devs)
+    return ioctls, list(dict.fromkeys(devices))
 
 
 def parse_source_dir(source_dir: Path) -> tuple[list[SourceFunction],
@@ -607,7 +839,8 @@ def analyze(session, *, binary: Optional[str] = None,
     source_dir = Path(source_dir)
     src_funcs, ioctls = parse_source_dir(source_dir)
     ue5_matches = parse_ue5_patterns(source_dir)
-    if not src_funcs and not ioctls and not ue5_matches:
+    poc_ioctls, poc_devices = parse_poc_files(source_dir)
+    if not src_funcs and not ioctls and not ue5_matches and not poc_ioctls:
         return []
 
     # Don't clobber names Binja's platform module already set (e.g.,
@@ -716,7 +949,50 @@ def analyze(session, *, binary: Optional[str] = None,
             )],
         ))
 
-    # 3. Pipeline summary Finding (info-level metadata).
+    # 3. PoC IOCTL findings — info-grade enrichment from standalone PoC files.
+    poc_seen: set[int] = set()
+    for io in poc_ioctls:
+        if io.code in poc_seen:
+            continue
+        poc_seen.add(io.code)
+        d = decode_ioctl(io.code)
+        findings.append(Finding(
+            id="",
+            category="standalone_poc_ioctl",
+            severity=Severity.INFO,
+            address=io.code,
+            function="<poc>",
+            binary=binary,
+            arch=arch,
+            platform=platform,
+            detector="analysis.source_surface.poc",
+            knowledge_refs=[],
+            cwe=[],
+            mitre_attack=[],
+            description=(
+                f"IOCTL {hex(io.code)} extracted from standalone PoC "
+                f"{io.file}:{io.line}: "
+                f"DeviceType={hex(d.device_type)}, "
+                f"Function={hex(d.function)}, "
+                f"Access={d.access_name}, Method={d.method_name}."
+                + (f" Driver target(s): {', '.join(poc_devices)}."
+                   if poc_devices else "")
+            ),
+            details=d.to_dict() | {
+                "source_match": io.matched_text,
+                "source_file": io.file,
+                "source_line": io.line,
+                "poc_device_names": poc_devices,
+            },
+            evidence=[Evidence(
+                kind="poc_ioctl",
+                source="analysis.source_surface.poc",
+                payload=f"{hex(io.code)} from PoC {io.file}:{io.line}",
+                address=0,
+            )],
+        ))
+
+    # 4. Pipeline summary Finding (info-level metadata).
     findings.append(Finding(
         id="",
         category="phase2_source_summary",
@@ -732,7 +1008,9 @@ def analyze(session, *, binary: Optional[str] = None,
             f"{len(src_funcs)} source functions parsed, {len(matches)} "
             f"matched to binary, {len(unmatched)} unmatched, "
             f"{renamed} binary functions renamed. "
-            f"{len(seen_codes)} unique IOCTL codes classified."
+            f"{len(seen_codes)} unique source IOCTL codes classified. "
+            f"{len(poc_seen)} PoC IOCTL codes from "
+            f"{len(poc_devices)} driver target(s)."
         ),
         details={
             "source_dir": str(source_dir),
@@ -741,10 +1019,12 @@ def analyze(session, *, binary: Optional[str] = None,
             "unmatched": len(unmatched),
             "renamed": renamed,
             "ioctl_codes": [hex(c) for c in sorted(seen_codes)],
+            "poc_ioctl_codes": [hex(c) for c in sorted(poc_seen)],
+            "poc_device_names": poc_devices,
         },
     ))
 
-    # 4. UE5 source-pattern findings (Plan D — Run 19).
+    # 5. UE5 source-pattern findings (Plan D — Run 19).
     for cat, file_rel, line, snippet in ue5_matches:
         meta = UE5_SOURCE_FINDING_META.get(cat)
         if meta is None:

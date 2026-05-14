@@ -623,8 +623,110 @@ Check each before recording the answer as confirmed.
 
 ---
 
+---
+
+## Windows Service Binary Supplement
+
+Applies when the analysis target is a Windows service or system binary
+(SYSTEM/LocalService/NetworkService privilege, exposes RPC/COM/ALPC
+interface, or is part of a multi-DLL service cluster). Supersedes the
+general S1–S3 order for these targets — the IPC surface is the analysis
+entry point, not the export list.
+
+### Cluster scoping (do before any single-binary analysis)
+
+Map the full service cluster before touching any individual binary.
+A cluster is the set of binaries that cooperate to implement the service's
+attack surface. Single-binary taint analysis misses inter-process primitives.
+
+Minimum cluster inventory:
+
+```
+Service host:   the .exe that registers the service (e.g. MsMpEng.exe)
+IPC proxy DLL:  the .dll that exposes the RPC/COM interface (e.g. MpSvc.dll)
+Client DLL:     the .dll callers link against (e.g. MpClient.dll)
+Comms DLL:      any .dll that handles channel plumbing (e.g. MpCommu.dll)
+```
+
+To discover the cluster: `sc qc <service>` (binary path), ProcMon trace
+of service startup (DLLs loaded), or static import walk from the service
+host executable.
+
+### Analysis order for Windows service binaries
+
+Mandatory first pass — run before any single-function taint:
+
+```
+1. rpc_interface.py   → which methods take path / string arguments?
+                         (UUID, dispatch table, NDR format-string walk)
+2. sddl.py            → which interface entries are reachable by
+                         low-privilege callers?
+                         (NULL DACL, Everyone/AU execute-or-broader)
+3. composition.py     → do any (SDDL-permissive entry, TOCTOU-containing
+                         function) pairs exist within call-graph reach?
+                         → rpc_callable_path_toctou (HIGH)
+                         → does any path-taking method co-locate with
+                           Cloud Files registration?
+                         → rpc_callable_cloud_stall (MEDIUM)
+```
+
+These three passes define the exploitable surface perimeter. All
+downstream taint/heap/crypto analysis is filtered against this perimeter —
+a taint finding that is not reachable from a permissive RPC entry is a
+lower-priority research candidate, not an actionable finding.
+
+### Cloud Files primitive check
+
+Run `cloud_files.py` against every Windows service binary in the cluster.
+The Cloud Files API (`CfRegisterSyncRoot`, `CfConnectSyncRoot`, `CfExecute`,
+`CfHydratePlaceholder`) is a timing primitive: a BLOCKING_CALLBACK on
+the sync-root freezes the file operation until the callback returns,
+holding open any TOCTOU window.
+
+Emit triggers:
+
+| Signal | Condition | Severity |
+|---|---|---|
+| `cloud_files_import` | Any CF import present | INFO |
+| `cloud_files_write_proxy` | CF import + co-located TOCTOU or permissive SDDL | HIGH |
+
+A `cloud_files_write_proxy` finding adjacent to an `rpc_callable_path_toctou`
+finding is the full RedSun-class shape (RPC entry → TOCTOU race → SYSTEM
+write routed through attacker-controlled junction).
+
+### Cross-binary reachability caveat (composition.py v1 limitation)
+
+`composition.py` v1 operates within a single binary's call graph.
+For clusters where the SDDL-protected RPC entry lives in one DLL and
+the path-taking function lives in another (e.g., entry in `MpSvc.dll`,
+TOCTOU in `MpCommu.dll`), the same-binary pass will miss the composition.
+
+Workaround: run the three passes against each DLL in the cluster
+independently, then manually check whether any HIGH/MEDIUM findings
+in different DLLs are connected via the cluster's known dispatch path.
+`composition.py` v2 (Tier 1.7, cross-binary reachability) will automate
+this. Until it lands, document the manual composition step in the
+findings if the signals span module boundaries.
+
+### Triage output supplement (Windows service)
+
+Extend the S1 triage summary with:
+
+```
+Cluster members: <list of DLLs + EXE in the service cluster>
+RPC interface: <UUID if found, else "not found">
+Path-taking methods: <list from rpc_interface.py output, or "none">
+SDDL permissiveness: <permissive / restrictive / not found>
+Cloud Files: <imports present / absent>
+Composition result: <rpc_callable_path_toctou / rpc_callable_cloud_stall / none>
+Cross-binary gap: <yes/no — which signals span module boundaries>
+```
+
+---
+
 ## Revision Log
 
 | Date | Change | Trigger |
 |---|---|---|
 | 2026-05-10 | Initial document | BombsLanded post-mortem: Capstone-as-primary, no preprocessing step, exports not read at triage, no early submission discipline |
+| 2026-05-13 | Windows Service Binary Supplement | NightmareEclipse post-mortem: single-binary analysis order misses IPC surface for service cluster targets; RPC→SDDL→Composition must precede taint for Windows service binaries |

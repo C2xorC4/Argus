@@ -14,11 +14,18 @@ targets. High FP volume on these = calibration problem.
 """
 from __future__ import annotations
 
+import io
 import os
 import sys
 import time
 from collections import Counter
 from pathlib import Path
+
+# Windows console may use cp1252 which can't encode arrows in finding
+# descriptions. Force UTF-8 for the entire script's stdout.
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8",
+                                  errors="replace", line_buffering=True)
 
 # Ensure scripts/ is importable regardless of cwd
 ARGUS_ROOT = Path(__file__).resolve().parents[1]
@@ -27,10 +34,10 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from scripts.lib import BinjaSession, load_config                    # noqa: E402
 from scripts.analysis import (                                       # noqa: E402
-    cleanup_dominance, crypto, decrypt_external_pages, heap,
-    integrity_check_order, mitigations, obfuscation, race, sddl,
-    source_surface, surface, taint, trusted_path, types, uninit,
-    windows_drivers,
+    cleanup_dominance, cloud_files, composition, crypto,
+    decrypt_external_pages, heap, integrity_check_order, mitigations,
+    obfuscation, race, rpc_interface, sddl, source_surface, surface,
+    taint, trusted_path, types, uninit, windows_drivers,
 )
 from scripts.heuristics import chains as heur_chains                 # noqa: E402
 from scripts.triage import auto_triage                               # noqa: E402
@@ -41,6 +48,9 @@ DEFAULT_TARGETS = [
     r"C:\Windows\System32\utilman.exe",
     r"C:\Windows\System32\sethc.exe",
     r"C:\Windows\System32\osk.exe",
+    # Expanded control set — service-adjacent and shell-infrastructure targets
+    r"C:\Windows\System32\taskmgr.exe",
+    r"C:\Windows\explorer.exe",
 ]
 
 
@@ -223,6 +233,18 @@ def validate_one(path: Path) -> dict:
         print(f"  dirfrg:  {result['dep_time_s']}s")
         _summarise(dep_findings, "dirty-frag findings")
 
+        # Cloud Files API — needs race + sddl findings for HIGH escalation.
+        # Runs before all_findings assembly so cf_findings are included.
+        t15 = time.time()
+        cf_findings = cloud_files.analyze(
+            session,
+            findings=list(race_findings) + list(sddl_findings),
+            binary=str(path), arch=result["arch"], platform=result["platform"])
+        result["cf_time_s"] = round(time.time() - t15, 2)
+        result["cf_findings"] = len(cf_findings)
+        print(f"  cfiles:  {result['cf_time_s']}s")
+        _summarise(cf_findings, "Cloud Files findings")
+
         all_findings = (list(surf_findings) + list(src_findings)
                         + list(taint_findings)
                         + list(heap_findings) + list(crypto_findings)
@@ -231,7 +253,7 @@ def validate_one(path: Path) -> dict:
                         + list(race_findings) + list(sddl_findings)
                         + list(ico_findings)
                         + list(cleanup_findings) + list(tpath_findings)
-                        + list(dep_findings))
+                        + list(dep_findings) + list(cf_findings))
 
         # Chain-pattern composition (Phase 1 final pass) — match the
         # heuristics/chains.py templates against the per-primitive
@@ -262,6 +284,21 @@ def validate_one(path: Path) -> dict:
         if promoted:
             print(f"  triage:  {promoted} findings DETECTED → CONFIRMED")
 
+        # Cross-detector composition — exploitation-grade composites.
+        # Runs AFTER triage so it sees CONFIRMED findings only.
+        try:
+            comp_findings = composition.analyze(
+                session, findings=all_findings,
+                binary=str(path), arch=result["arch"], platform=result["platform"])
+        except Exception as e:
+            print(f"  [warn] composition: {type(e).__name__}: {e}")
+            comp_findings = []
+        result["comp_findings"] = len(comp_findings)
+        if comp_findings:
+            all_findings.extend(comp_findings)
+            print(f"  compose: {len(comp_findings)} composite finding(s)")
+            _summarise(comp_findings, "composition findings")
+
         # Phase 3 PoC composition — read the chain findings + their
         # contributing per-primitive findings, build PoC skeletons,
         # transition CONFIRMED → IMPACT_PENDING on consumed primitives.
@@ -287,9 +324,11 @@ def validate_one(path: Path) -> dict:
                             reverse=True)
             print(f"  top 5 by mitigation-weighted exploitability:")
             for f in scored[:5]:
+                desc = (f.description or "")[:64].encode("ascii", "replace").decode()
+                func = (f.function or "<bin>")[:24].encode("ascii", "replace").decode()
                 print(f"    {f.mitigation_weighted_exploitability:.3f}  "
                       f"[{f.severity.value:8s}] {f.category:32s} "
-                      f"@{f.function or '<bin>':24s}  {f.description[:64]}")
+                      f"@{func:24s}  {desc}")
 
     print(f"  TOTAL: {result['total_findings']} findings  "
           f"in {result['total_time_s']}s")
