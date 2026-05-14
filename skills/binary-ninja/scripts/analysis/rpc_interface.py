@@ -70,9 +70,10 @@ per-method semantics.
 v2 scanner confirmed gap (2026-05-13, MpSvc.dll 4.18.26030.3011-0):
   The FC_WSTRING (0x25) / FC_C_WSTRING (0x26) direct byte scan in
   _ndr_proc_has_wstring_param MISSES PWSTR parameters encoded as
-  FC_RP (0x11) or FC_UP (0x12) followed by a type-format-string
-  offset pointing to FC_C_WSTRING. MIDL almost always uses this
-  pointer-chain encoding for [unique/ref, string] wchar_t* params.
+  Oif-format TypeFormatString offsets. MIDL Oif mode stores parameter
+  type descriptors as 2-byte offsets into the TypeFormatString blob;
+  the FC_WSTRING / FC_RP bytes appear only in TypeFormatString, not in
+  the proc format string.
 
   Consequence: `ServerMpUpdateEngineSignature` (proc_idx=42, the
   BlueHammer chain target) was NOT found by the v2 scan. The 5
@@ -80,11 +81,18 @@ v2 scanner confirmed gap (2026-05-13, MpSvc.dll 4.18.26030.3011-0):
   are quarantine/sample/DLP handlers. PROC_IDX=42 was confirmed
   via Binja dispatch-table walk + decompile of callees.
 
-  v3 fix: in _ndr_proc_has_wstring_param, follow FC_RP/FC_UP pointer
-  descriptors from the proc format string into the TYPE format string
-  and scan for FC_C_WSTRING there. ProcString and TypeFormatString are
-  separate blobs in MIDL_STUB_DESC — TYPE offset is at MIDL_SERVER_INFO
-  pStubDesc → TypeFormatString.
+  v3 partial fix: scan proc format string for FC_RP/FC_UP inline
+  descriptors (pre-Oif encoding or rare explicit pointer params).
+  Does not catch proc_idx=42.
+
+  v3b fix (2026-05-14): scan 2-byte aligned WORDs in the proc format
+  string as candidate TypeFormatString offsets. For each offset that
+  lands in the binary, call _tf_is_wstring_pointer to follow the type
+  chain. Catches proc_idx=42: its Oif param descriptor contains WORD
+  0x05ce, and TypeFormatString[0x05ce] = FC_WSTRING (0x25) directly.
+  TypeFormatString offsets point to FC_RP / FC_UP / FC_FP chains OR
+  to FC_WSTRING/FC_C_WSTRING directly; _tf_is_wstring_pointer handles
+  both cases.
 
 This is `compose`-class output: it composes a `permissive_sddl`
 signal, a `toctou` signal, and the dispatch enumeration into
@@ -429,7 +437,46 @@ def _find_midl_server_info(
 
 _FC_RP = 0x11  # reference pointer
 _FC_UP = 0x12  # unique pointer
+_FC_OP = 0x13  # OLE pointer
+_FC_FP = 0x14  # full pointer
 _FC_SIMPLE_POINTER = 0x08  # flags bit: type descriptor is inline (2 bytes)
+
+_POINTER_FC_CODES = (_FC_RP, _FC_UP, _FC_OP, _FC_FP)
+
+
+def _tf_is_wstring_pointer(bv, addr: int, depth: int = 0) -> bool:
+    """Follow a pointer descriptor chain starting at `addr` in the
+    TypeFormatString and return True if it eventually reaches
+    FC_WSTRING (0x25) or FC_C_WSTRING (0x26).
+
+    TypeFormatString pointer descriptor layout:
+      byte 0: FC_RP / FC_UP / FC_OP / FC_FP
+      byte 1: flags (FC_SIMPLE_POINTER = 0x08 → inline type at byte 2)
+      bytes 2-3: if not FC_SIMPLE_POINTER:
+                   signed 16-bit offset from &byte[2] to the pointee type
+
+    Follows chains up to depth 6 to handle multi-level pointers.
+    """
+    if depth > 6:
+        return False
+    try:
+        tb = bv.read(addr, 4)
+    except Exception:
+        return False
+    if not tb or len(tb) < 2:
+        return False
+    fc = tb[0]
+    if fc in (_FC_WSTRING, _FC_C_WSTRING):
+        return True
+    if fc not in _POINTER_FC_CODES:
+        return False
+    if len(tb) < 4:
+        return False
+    flags = tb[1]
+    if flags & _FC_SIMPLE_POINTER:
+        return len(tb) > 2 and tb[2] in (_FC_WSTRING, _FC_C_WSTRING)
+    signed_off = struct.unpack_from("<h", tb, 2)[0]
+    return _tf_is_wstring_pointer(bv, addr + 2 + signed_off, depth + 1)
 
 
 def _ndr_proc_has_wstring_param(
@@ -447,10 +494,10 @@ def _ndr_proc_has_wstring_param(
         in the proc format string chunk. Catches [string] wchar_t* params
         encoded inline.
 
-    v3: follow FC_RP (0x11) / FC_UP (0x12) pointer descriptors into the
-        TYPE format string and check for FC_C_WSTRING there. Catches the
-        common MIDL encoding for [ref/unique, string] wchar_t* params where
-        the type descriptor lives in the separate TypeFormatString blob.
+    v3: follow FC_RP (0x11) / FC_UP (0x12) pointer descriptors that appear
+        directly in the proc format string into the TypeFormatString and
+        check for FC_C_WSTRING there. Handles the encoding where the
+        ProcFormatString directly contains an FC_RP byte.
 
         FC_RP/FC_UP layout in proc format string:
           byte 0: FC_RP or FC_UP
@@ -459,6 +506,16 @@ def _ndr_proc_has_wstring_param(
                      else: signed 16-bit offset from &offset_field into
                            TypeFormatString (computed as:
                            proc_string_ptr + proc_offset + i + 2 + signed_off)
+
+    v3b (Oif format): in Oif-style proc format strings, parameter type
+        descriptors do NOT contain inline FC_RP bytes. Instead each 6-byte
+        parameter descriptor ends with a 2-byte TypeFormatString offset
+        (absolute from type_format_ptr). The FC_RP lives only in the
+        TypeFormatString. This path scans every 2-byte aligned WORD in the
+        proc chunk as a candidate TypeFormatString offset, then calls
+        _tf_is_wstring_pointer to check if it chains to WSTRING.
+
+        Requires type_format_ptr (from MIDL_STUB_DESC.pFormatTypes).
 
     Scan is bounded by the next method's offset (or 256 bytes). Returns
     False on any read failure or when the method has no format string.
@@ -490,23 +547,18 @@ def _ndr_proc_has_wstring_param(
     if _FC_WSTRING in chunk or _FC_C_WSTRING in chunk:
         return True
 
-    # v3: follow FC_RP / FC_UP pointer descriptors.
-    # The corrected BlueHammer fix: ServerMpUpdateEngineSignature's PWSTR
-    # parameter is encoded as FC_RP → TypeFormatString → FC_C_WSTRING
-    # (not as a direct FC_WSTRING byte in the proc chunk).
+    # v3: follow FC_RP / FC_UP pointer descriptors that appear inline in the
+    # proc format string (pre-Oif encoding or explicit pointer params).
     for i in range(len(chunk) - 3):
         b = chunk[i]
         if b not in (_FC_RP, _FC_UP):
             continue
         flags = chunk[i + 1]
         if flags & _FC_SIMPLE_POINTER:
-            # Inline type: byte at i+2 is the type code.
             if chunk[i + 2] in (_FC_WSTRING, _FC_C_WSTRING):
                 return True
         else:
-            # Offset into TypeFormatString: signed 16-bit from position i+2.
             signed_off = struct.unpack_from("<h", chunk, i + 2)[0]
-            # Target is absolute VA: offset field VA + signed_off.
             offset_field_va = proc_string_ptr + proc_offset + i + 2
             target_va = offset_field_va + signed_off
             if not (bv.start <= target_va < bv.end):
@@ -516,6 +568,27 @@ def _ndr_proc_has_wstring_param(
             except Exception:
                 continue
             if tb and tb[0] in (_FC_WSTRING, _FC_C_WSTRING):
+                return True
+
+    # v3b: Oif-format param descriptor scan.
+    # In Oif proc format strings the 6-byte parameter descriptor ends with a
+    # 2-byte TypeFormatString offset (absolute from type_format_ptr). There is
+    # no inline FC_RP in the proc format string — the pointer type lives only in
+    # the TypeFormatString. Scan every 2-byte aligned WORD in the proc chunk as
+    # a candidate TF offset and follow it through _tf_is_wstring_pointer.
+    if type_format_ptr is not None:
+        seen: set[int] = set()
+        for i in range(0, len(chunk) - 1, 2):
+            tf_off = struct.unpack_from("<H", chunk, i)[0]
+            # Skip zero and values we've already checked; skip if the TF
+            # address falls outside the binary's mapped range.
+            if tf_off < 4 or tf_off in seen:
+                continue
+            seen.add(tf_off)
+            tf_addr = type_format_ptr + tf_off
+            if not (bv.start <= tf_addr < bv.end):
+                continue
+            if _tf_is_wstring_pointer(bv, tf_addr):
                 return True
 
     return False
@@ -793,7 +866,7 @@ def find_rpc_interface_methods(
                         f"proc_idx={proc_idx} "
                         f"handler=0x{dispatch_addr:x} "
                         f"transfer_syntax={transfer_syntax} "
-                        f"ndr_scan=v3(FC_RP/FC_UP→TypeFmt)|v2(FC_WSTRING/FC_C_WSTRING)"
+                        f"ndr_scan=v3b(TF_offset)|v3(FC_RP/FC_UP)|v2(FC_WSTRING/FC_C_WSTRING)"
                     ),
                     address=int(dispatch_addr),
                     function=handler_name,
@@ -804,7 +877,7 @@ def find_rpc_interface_methods(
                     "handler_addr": hex(int(dispatch_addr)),
                     "handler_function": handler_name,
                     "transfer_syntax": transfer_syntax,
-                    "ndr_fc_type": "FC_WSTRING|FC_RP→FC_C_WSTRING",
+                    "ndr_fc_type": "FC_WSTRING|FC_RP->FC_C_WSTRING",
                     "ndr_scanner_version": "v3",
                 },
             ))
@@ -862,4 +935,6 @@ __all__ = [
     "_KNOWN_INTERFACES",
     "_read_transfer_syntax", "_find_midl_server_info",
     "_ndr_proc_has_wstring_param",
+    "_tf_is_wstring_pointer",
+    "_FC_FP", "_FC_OP", "_POINTER_FC_CODES",
 ]
