@@ -493,12 +493,12 @@ and IPC entries (`accept`, `msgrcv`, `mq_receive`, `shmat`).
 | `sethc.exe` | 0 | Clean. CFG-disjoint-branch fix correctly suppresses the phi-merge artefact. |
 | `osk.exe` | 0 | Clean. |
 
-**Expanded control set** (2026-05-13 run — first pass with cloud_files + composition modules active):
+**Expanded control set** (2026-05-15 rescan):
 
 | Binary | Findings | Key result |
 |---|---|---|
-| `taskmgr.exe` | 153 | 46 `weak_prng_in_security_path` in keyboard/focus-handler functions (`IsItemKeyFocused`, `IsDeleteKeyInvokedInSearch`, `HandleAccessKeyMessages`, etc.) — FP class: "Key" in UI function names triggers security-path gate. `ue5_prng_cookie_amplification` chain fires on the 46-count PRNG set — FP class: chain needs game/UE5 context discriminator to suppress on non-game binaries. 38 `heap_buffer_overflow` + 1 `type_confusion` → `chains.heapof_vtable_rop (CRITICAL)` — pending manual triage. 1 `trusted_path_cache_load (MEDIUM)`. 0 SDDL → no composition. 0 Cloud Files. |
-| `explorer.exe` | 150 | **2 `rpc_hosted_toctou_cooccurrence (MEDIUM)` composite findings** — first non-Defender binary to produce composition output. 2 HIGH TOCTOU + 2 HIGH `permissive_sddl` co-present; same-binary call-graph reachability check fired. Functions TBD (triage pending). `apc_injection_remote (HIGH, 0.700 exploitability)` — `OpenThread + QueueUserAPC`, Early-Bird pattern. 5 CRITICAL `tainted_pointer_dereference`. 0 Cloud Files. |
+| `taskmgr.exe` | 164 | 47 `weak_prng_in_security_path (HIGH)` — FP class: hash-key and registry-key function names (`WdcHashKey`, `CustomWindowKeyHash`, `TmRegKeyEnum`) trigger security-path gate; key-name denylist needs extension to cover hash-function naming patterns (distinct from UI-key issue). 25 `lcg_xor_cipher (MEDIUM)` — see LCG-as-cipher/PRNG to-do. 1 `tainted_pointer_dereference (CRITICAL)`. 38 `heap_buffer_overflow` + 1 `type_confusion` → `chains.heapof_vtable_rop (CRITICAL)` + `chains.typeconf_arbread_deref (CRITICAL)` — pending manual triage. 1 `trusted_path_cache_load (MEDIUM)`. 0 SDDL → no composition. 0 Cloud Files. |
+| `explorer.exe` | 139 | 5 CRITICAL `tainted_pointer_dereference`. 110 `heap_buffer_overflow (HIGH)` + 7 `unchecked_allocation`. 2 HIGH TOCTOU. 0 SDDL (regression from 2026-05-13 run — previous run had 2 HIGH `permissive_sddl`; composition no longer fires). `apc_injection_remote (HIGH, 0.700 exploitability)` — `OpenThread + QueueUserAPC`, Early-Bird pattern. 1 `uninitialised_memory_disclosure (MEDIUM)`. 0 Cloud Files. |
 
 ## Pre-Argus comparison
 
@@ -561,7 +561,8 @@ score, neither of which the legacy pipeline produces.
 |---|---|
 | Struct-field aliasing for double-free | `e->name` vs `e.name` cross-function alias; needs interprocedural alias analysis. `vulntest/tier1-single/double-free/c` remains FN. |
 | C++ memory-region taint | Required for cpp variants (format-string / stack-OF / heap-OF) to propagate end-to-end through `std::string` objects. SSO-aware. The SSA-only data model needs region tags. |
-| LCG-as-cipher / LCG-as-PRNG distinction | Context classifier for synthetic-PRNG-source approach. Without it, GameGuard-class binaries with 720+ LCG-XOR string-cipher call sites would FP. |
+| LCG-as-cipher / LCG-as-PRNG distinction | Context classifier for the `weak_prng_in_security_path` primitive detector. Two open sub-classes: (1) binaries that use LCG-XOR for string obfuscation (not entropy) produce hundreds of spurious PRNG findings — taskmgr.exe shows 25 `lcg_xor_cipher` alongside 47 `weak_prng_in_security_path`; (2) hash-key function naming (`WdcHashKey`, `TmRegKeyEnum`) triggers the security-path gate — key-name denylist needs semantic extension beyond the current UI-key filter. |
+| `explorer.exe` SDDL regression | 2026-05-15 rescan shows 0 `permissive_sddl` vs 2 HIGH in the 2026-05-13 run; `rpc_hosted_toctou_cooccurrence` composition no longer fires. Likely binary update. Confirm SDDL status on current build before triage of the TOCTOU pair. |
 | Type-confusion per-call-site anchoring | Current detector is binary-level research-grade (no-RTTI + virtual-dispatch present). v2 needs source-pattern detection on unguarded `static_cast<X*>`. |
 | Cross-detector dedup at orchestrator level | `heap.py` and `taint.py` both emit `heap_buffer_overflow` on heap-overflow/c with different `detector` strings. |
 | Plan A V2/conditional ACE handling | Grammar reference now in `Memory/Knowledge/windows_sddl_grammar.md`; parser still v1. |
@@ -571,7 +572,7 @@ score, neither of which the legacy pipeline produces.
 | Per-language detectors (Go gopclntab, Rust DWARF + panic-string anchors, .NET IL walk) | `dotnet_managed.py` v1 is heuristic string co-presence. Multi-lang cells are currently skipped by the local-verify harness (`--c-cpp-only` filter) until per-language detectors can distinguish runtime patterns from real bugs (Go runtime's `<=` comparisons FP into the off-by-one detector, Rust release binaries' large function counts time out under the same detector, etc.). |
 | Linux kernel-module build infrastructure | `vulntest/tier1-single/decrypt-into-external-pages/c` and the dirty-frag fixtures both rely on out-of-tree `.ko` builds; missing toolchain in the fixture corpus blocks any Phase-4 verification driven from inside the repo. The Phase-4 harness already differentiates `verify_remote` (kernel-LPE) vs `verify_local` (userspace) — only the fixtures are missing. |
 | Cross-arch target validation | AArch64, MIPS, RISC-V — verify `heuristics/syscalls.py` cross-arch SVC / ECALL patterns fire correctly. |
-| Expanded Windows control set — continued | `cmd.exe`, `notepad.exe`. (explorer.exe + taskmgr.exe swept 2026-05-13 — see validation history below.) |
+| Expanded Windows control set — continued | `cmd.exe`, `notepad.exe`. (explorer.exe + taskmgr.exe rescanned 2026-05-15 — see validation history.) |
 | Linux ELF control set | `bash`, `coreutils`, `openssl`. |
 | BYOVD-set re-sweep with Tier-2 + Plans A-C | Run 12 covered 13/13 BYOVD drivers for primitives only; foundational classes have not been swept across the same set yet. |
 

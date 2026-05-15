@@ -21,8 +21,44 @@ Knowledge anchors:
 
 from __future__ import annotations
 
-from ._base import ChainPattern, Pattern
+from ._base import ChainPattern, Pattern, strings_in
 from ..output.finding import Severity
+
+
+# ─────────────────────────────────────────────────────────────────
+# Binary-context gate helpers
+# ─────────────────────────────────────────────────────────────────
+
+
+# Strings present in virtually every UE5 binary (shipping server or
+# editor) and absent from Windows system32 / non-game binaries.
+# A single match is sufficient to classify the binary as UE5.
+_UE5_BINARY_MARKERS: frozenset[str] = frozenset({
+    "Unreal Engine", "UnrealEngine", "UObject", "FString",
+    "TArray", "FMath::", "/Game/", ".uasset", ".umap",
+    "UnrealEditor", "Epic Games", "FName::", "GEngine",
+})
+
+
+def _binary_has_tag(bv, tag: str) -> bool:
+    """Return True if the binary carries the named context tag.
+
+    When bv is None (unit-test / no-binary-view mode) the gate is
+    bypassed — returns True — so chain-composition unit tests that
+    pass bv=None continue to exercise threshold and primitive logic
+    without needing a mock BinaryView.  In real pipeline runs bv is
+    always a live BinaryView and the gate is enforced.
+    """
+    if bv is None:
+        return True
+    if tag == "ue5_binary":
+        for s, _ in strings_in(bv, min_length=6):
+            if any(marker in s for marker in _UE5_BINARY_MARKERS):
+                return True
+        return False
+    # Unknown tags fail closed — don't fire a chain for a tag we
+    # don't know how to verify.
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -104,6 +140,12 @@ UE5_PRNG_COOKIE_AMPLIFICATION = ChainPattern(
     # Require ≥3 independent weak_prng_in_security_path findings before
     # firing — a single hit is not sufficient signal for this chain shape.
     min_per_primitive={"weak_prng_in_security_path": 3},
+    # Engine-class discriminator: only fire on binaries whose string
+    # table contains UE5 engine markers.  Non-game binaries (e.g.
+    # taskmgr.exe) with many weak-PRNG findings in UI/focus handlers
+    # are suppressed here; their individual weak_prng_in_security_path
+    # findings still emit at the primitive severity level.
+    context_gate=frozenset({"ue5_binary"}),
 )
 
 
@@ -457,6 +499,11 @@ def match(bv, *, binary: str, arch: str, platform: str,
                     else len(chain.primitives))
         if len(matched_prims) < required:
             continue
+        # Binary-context gate: verify engine / platform class before firing.
+        # bv=None bypasses the gate (unit-test mode).
+        if chain.context_gate:
+            if not all(_binary_has_tag(bv, tag) for tag in chain.context_gate):
+                continue
         # Per-primitive count gate: if chain specifies min_per_primitive,
         # count how many findings carry each gated category.
         if chain.min_per_primitive:

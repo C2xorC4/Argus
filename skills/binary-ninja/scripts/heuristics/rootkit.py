@@ -123,7 +123,9 @@ UEFI_RUNTIME_HOOK = StringPattern(
     string_literals=[
         "RT->GetVariable", "EFI_RUNTIME_SERVICES",
         "EFI_BOOT_SERVICES", "EFI_LOADED_IMAGE_PROTOCOL",
-        "gRT", "gBS", "gST",
+        # gRT / gBS / gST are 3-char C variable names from EFI headers —
+        # not binary string constants; removed after confirmed FP:
+        # 'gST' matched inside 'tagSTYLESTRUCT' in taskmgr.exe.
     ],
     notes="Useful only on UEFI images / pre-OS payloads. Skip on standard PE/ELF user-mode targets.",
 )

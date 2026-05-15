@@ -148,6 +148,14 @@ class ChainPattern(Pattern):
     all). Use this to keep the canonical chain shape documented while
     letting the chain fire on the subset that's currently detectable.
 
+    `context_gate` is a frozenset of binary-context tags that must ALL
+    be present in the analysed binary before this chain can fire. Tags
+    are resolved by `heuristics.chains._binary_has_tag(bv, tag)`. When
+    `bv` is None (unit-test mode), the gate is bypassed so chain-
+    composition tests don't require a mock BinaryView. An empty
+    frozenset (the default) means no gate — the chain fires on any
+    binary that satisfies the primitives + count requirements.
+
     Used by `analysis/chains.py` to compose Tier-1 findings into
     Tier-2 chain emissions.
     """
@@ -157,6 +165,7 @@ class ChainPattern(Pattern):
     same_function: bool = False
     min_primitives: Optional[int] = None
     min_per_primitive: Optional[dict] = None
+    context_gate: frozenset = field(default_factory=frozenset)
 
 
 # ─────────────────────────────────────────────────────────────────
