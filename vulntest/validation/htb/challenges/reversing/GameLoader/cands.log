@@ -1,4 +1,0 @@
-ERROR: Parameter "p_child" is null.
-   at: add_child (scene\main\node.cpp:1391)
-[log] 12 rw ranges in EXE module
-[log] scanned 252880 windows, kept 6147

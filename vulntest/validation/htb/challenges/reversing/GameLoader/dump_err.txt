@@ -1,2 +1,0 @@
-ERROR: Parameter "p_child" is null.
-   at: add_child (scene\main\node.cpp:1391)

@@ -177,42 +177,65 @@ def _file_sha1(binary_path: str) -> str | None:
         return None
 
 
-def _read_bytes_at(bv, address: int, length: int) -> bytes | None:
-    """Read `length` bytes from the given address in the BinaryView.
+def _resolve_va(bv, address: int, length: int) -> int | None:
+    """Return the effective virtual address for a corpus-recorded offset.
 
-    `address` is the corpus-recorded offset — empirically RVA / file
-    offset within the .text region. We try treating it as a virtual
-    address first (most patches in the corpus are PE images where
-    Binja's bv addresses are VAs equal to `image_base + RVA`); if
-    that yields nothing, we fall back to reading at
-    `bv.start + address` to handle alternative bases.
+    `address` is a module-relative offset (RVA / patchlet_address from
+    the 0patch corpus). Returns the Binja VA where the bytes were found,
+    or None if the address maps to no readable region.
     """
     if bv is None:
         return None
     read = getattr(bv, "read", None)
     if not callable(read):
         return None
-    # Direct VA read
+    # Direct VA read (PE image already rebased by Binja).
     try:
         data = read(address, length)
         if data and len(data) == length:
-            return bytes(data)
+            return address
     except Exception:
         pass
-    # Try interpreting as offset within the binary's image
+    # Fall back to image_base + offset.
     try:
         base = getattr(bv, "start", 0) or 0
-        data = read(base + address, length)
+        va = base + address
+        data = read(va, length)
         if data and len(data) == length:
-            return bytes(data)
+            return va
     except Exception:
         pass
     return None
 
 
-def _emit_finding(entry: _CorpusEntry, *, address: int, binary: str,
-                  arch: str, platform: str, detector: str,
-                  match_kind: str, byte_match: bool) -> Finding:
+def _read_bytes_at(bv, address: int, length: int) -> bytes | None:
+    """Read `length` bytes from the given address in the BinaryView."""
+    va = _resolve_va(bv, address, length)
+    if va is None:
+        return None
+    try:
+        data = bv.read(va, length)
+        return bytes(data) if data and len(data) == length else None
+    except Exception:
+        return None
+
+
+def _function_name_at(bv, va: int) -> str:
+    """Return the name of the function containing `va`, or '<binary>'."""
+    if bv is None or va == 0:
+        return "<binary>"
+    try:
+        fns = bv.get_functions_containing(va)
+        if fns:
+            return fns[0].name or "<binary>"
+    except Exception:
+        pass
+    return "<binary>"
+
+
+def _emit_finding(entry: _CorpusEntry, *, address: int, resolved_va: int,
+                  function: str, binary: str, arch: str, platform: str,
+                  detector: str, match_kind: str, byte_match: bool) -> Finding:
     sev = _severity_for(entry.vulnerability_class)
     cve_str = ",".join(entry.cves) if entry.cves else "no-CVE"
     desc = (
@@ -228,8 +251,8 @@ def _emit_finding(entry: _CorpusEntry, *, address: int, binary: str,
         id="",
         category="known_vulnerable_pattern",
         severity=sev,
-        address=address,
-        function="<binary>",
+        address=resolved_va,
+        function=function,
         binary=binary,
         arch=arch,
         platform=platform,
@@ -242,6 +265,7 @@ def _emit_finding(entry: _CorpusEntry, *, address: int, binary: str,
         details={
             "match_kind": match_kind,
             "byte_signature_present": byte_match,
+            "corpus_offset": address,
             "module_hash_in_corpus": entry.module_hash,
             "vulnerability_class": entry.vulnerability_class,
             "cves": entry.cves,
@@ -260,9 +284,13 @@ def match(bv, *, binary: str, arch: str, platform: str,
 
     Uses the operator's local 0patch corpus as ground truth. Finds are:
     - **exact match**: SHA-1 of `binary` is in the corpus → every
-      recorded offset is flagged.
+      recorded patch site is flagged (one finding per patchlet site,
+      deduplicated per (vulnerability_key, address) so the same site
+      doesn't appear twice if multiple corpus entries share a hash).
     - **fuzzy match**: SHA-1 differs but file name matches a corpus
       entry → scan recorded offsets for the pre-patch byte signature.
+      Deduplicated per vulnerability_key: the same vulnerability that
+      appears across many binary versions emits exactly one finding.
 
     No Finding is produced when nothing in the corpus references the
     binary (by name or hash).
@@ -278,46 +306,80 @@ def match(bv, *, binary: str, arch: str, platform: str,
         sha1 = sha1.lower()
     name = Path(binary).name.lower()
 
+    def _vuln_key(entry: _CorpusEntry) -> tuple:
+        return (entry.vulnerability_class, frozenset(entry.cves), entry.description)
+
     # Exact match — operator's binary IS one of the recorded versions.
-    seen_entries: set[id] = set()
+    # Deduplicate by (vuln_key, patchlet_address): the corpus may have
+    # multiple entries for the same SHA-1 × vulnerability.
+    seen_entries: set[int] = set()
+    seen_exact: set[tuple] = set()   # (vuln_key, address)
     if sha1 and sha1 in _BY_HASH:
         for entry in _BY_HASH[sha1]:
             seen_entries.add(id(entry))
             for offset in entry.offsets:
-                # Verify the bytes are still there (they should be —
-                # 0patch doesn't modify on-disk binaries — but be
-                # defensive in case a vendor patch already shipped).
-                actual = _read_bytes_at(bv, offset.address,
-                                        len(offset.original_bytes))
+                site_key = (_vuln_key(entry), offset.address)
+                if site_key in seen_exact:
+                    continue
+                seen_exact.add(site_key)
+                va = _resolve_va(bv, offset.address, len(offset.original_bytes))
+                actual = None
+                if va is not None:
+                    try:
+                        data = bv.read(va, len(offset.original_bytes))
+                        actual = bytes(data) if data and len(data) == len(offset.original_bytes) else None
+                    except Exception:
+                        pass
                 byte_match = (actual == offset.original_bytes)
+                fn = _function_name_at(bv, va or 0)
                 out.append(_emit_finding(
                     entry,
                     address=offset.address,
+                    resolved_va=va or offset.address,
+                    function=fn,
                     binary=binary, arch=arch, platform=platform,
                     detector=detector,
                     match_kind="exact",
                     byte_match=byte_match,
                 ))
 
-    # Fuzzy match — same binary name, different version, but the
-    # pre-patch byte signature is present at the recorded offset.
+    # Fuzzy match — same binary name, different version.
+    # Deduplicate by vuln_key: the same vulnerability in N recorded
+    # versions of the binary should produce exactly one finding.
+    # Within each vuln_key group, prefer the first confirmed byte-match
+    # and stop scanning additional corpus versions once found.
     candidates = _BY_MODULE.get(name, [])
+    seen_fuzzy: dict[tuple, Finding] = {}  # vuln_key → best finding
     for entry in candidates:
         if id(entry) in seen_entries:
             continue
+        vk = _vuln_key(entry)
+        if vk in seen_fuzzy:
+            # Already have a confirmed byte-match for this vulnerability;
+            # additional corpus versions can't improve it.
+            continue
         for offset in entry.offsets:
-            actual = _read_bytes_at(bv, offset.address,
-                                    len(offset.original_bytes))
-            if actual is None:
+            va = _resolve_va(bv, offset.address, len(offset.original_bytes))
+            if va is None:
                 continue
+            try:
+                data = bv.read(va, len(offset.original_bytes))
+                actual = bytes(data) if data and len(data) == len(offset.original_bytes) else None
+            except Exception:
+                actual = None
             if actual == offset.original_bytes:
-                out.append(_emit_finding(
+                fn = _function_name_at(bv, va)
+                seen_fuzzy[vk] = _emit_finding(
                     entry,
                     address=offset.address,
+                    resolved_va=va,
+                    function=fn,
                     binary=binary, arch=arch, platform=platform,
                     detector=detector,
                     match_kind="fuzzy",
                     byte_match=True,
-                ))
+                )
+                break  # one confirmed site per vulnerability is sufficient
 
+    out.extend(seen_fuzzy.values())
     return out

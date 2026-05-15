@@ -71,7 +71,7 @@ large.
 
 **Sprint 4:** NightmareEclipse §0–§11 (RPC walker, NDR v2/v3b, cloud_files detector, composition v1+rpc_callable_cloud_stall, Windows-lab harness, BlueHammer/RedSun/UnDefend PoC runs, §10 comparison, §11 post-mortem). Also: FP fixes 2.4/2.5/2.7, composition v2 cross-binary reachability (1.7), gate-6 docs 1.6. 154 tests total. ✅ Done 2026-05-14.
 
-**Sprint 5 (complete):** 2.9/2.10/2.11/2.2/2.3 ✅ done 2026-05-14. Optional: NE.8b RedSun IMPACT_VERIFIED via Cloud Files. Backlog: 0.4 (Gate-6 doc completion), 4.1 (differ/patch Phase 5). Tier 3 deferred unless engagement requires source-aware analysis.
+**Sprint 5 (complete):** 2.9/2.10/2.11/2.2/2.3 ✅ done 2026-05-14. known_vulnerable_patterns dedup fix: exact-match (vuln×address) and fuzzy-match (vuln_key across corpus versions) deduplication; _resolve_va/function_name helpers; 39 new tests (205 total). vulntest/validation/ untracked from repo. ✅ Done 2026-05-15. Optional: NE.8b RedSun IMPACT_VERIFIED via Cloud Files. Backlog: 0.4 (Gate-6 doc completion), 4.1 (differ/patch Phase 5). Tier 3 deferred unless engagement requires source-aware analysis.
 
 ## Promotion-gate dependencies
 
