@@ -16,7 +16,9 @@ Algorithm (per pattern):
   version means no intervening reassignment).
 
 - **Double-free**: If an SSA variable appears as the freed-pointer
-  argument in ≥ 2 free callsites, flag double-free.
+  argument in ≥ 2 free callsites, flag double-free.  Also detects
+  cross-function struct-field aliasing: callee frees (*param).field;
+  caller also frees the same field — a classic cleanup-path double-free.
 
 - **Heap-OF**: For each malloc-class callsite, the SSA output is the
   alloc handle. If a subsequent memcpy/memmove/strcpy uses that
@@ -278,6 +280,176 @@ def _ssa_var_str(v) -> str:
     if name is not None and version is not None:
         return f"{name}#{version}"
     return str(v)
+
+
+def _load_to_base_offset(load_expr):
+    """Decompose a Load MLIL expression into (base_ssa_var, field_offset).
+
+    Handles Load(var), Load(var + const), Load(var - const).
+    Returns None if the expression doesn't match these shapes.
+    """
+    src = getattr(load_expr, "src", None)
+    if src is None:
+        return None
+    src_op = type(src).__name__
+    direct = ilh.expr_to_ssa_var(src)
+    if direct is not None:
+        return (direct, 0)
+    if "Add" in src_op or "Sub" in src_op:
+        left = getattr(src, "left", None)
+        right = getattr(src, "right", None)
+        sign = -1 if "Sub" in src_op else 1
+        left_ssa = ilh.expr_to_ssa_var(left)
+        if left_ssa is not None:
+            cval = getattr(right, "constant", None)
+            if cval is not None:
+                return (left_ssa, sign * int(cval))
+        if "Add" in src_op:
+            right_ssa = ilh.expr_to_ssa_var(right)
+            if right_ssa is not None:
+                cval = getattr(left, "constant", None)
+                if cval is not None:
+                    return (right_ssa, int(cval))
+    return None
+
+
+def _extract_load_base_offset(expr, func=None, max_hops: int = 2):
+    """Extract (base_ssa, field_offset) from a free()-argument expression.
+
+    Path 1 — direct Load:  free(Load(ptr + offset))
+    Path 2 — named field:  free(field_var) where field_var is defined as
+              Load(ptr + offset).  Binary Ninja lifts struct fields to named
+              MLIL variables when type information is available; walking SSA
+              defs up to max_hops steps finds the backing Load.
+    """
+    if expr is None:
+        return None
+    if "Load" in type(expr).__name__:
+        return _load_to_base_offset(expr)
+    if func is None:
+        return None
+    ssa_var = ilh.expr_to_ssa_var(expr)
+    if ssa_var is None:
+        return None
+    seen: set = set()
+    cur = ssa_var
+    for _ in range(max_hops):
+        if cur is None:
+            return None
+        key = str(cur)
+        if key in seen:
+            return None
+        seen.add(key)
+        defn = ilh.ssa_def_of(func, cur)
+        if defn is None:
+            return None
+        src = getattr(defn, "src", None)
+        if src is None:
+            return None
+        if "Load" in type(src).__name__:
+            return _load_to_base_offset(src)
+        nested = ilh.expr_to_ssa_var(src)
+        if nested is not None:
+            cur = nested
+            continue
+        return None
+    return None
+
+
+def _resolve_to_param_idx(func, ssa_var, param_vars: list, max_hops: int = 3) -> int:
+    """Return 0-based parameter index if ssa_var (or its SSA-def chain) came
+    from a function parameter.  Returns -1 on no match.
+    """
+    if ssa_var is None or not param_vars:
+        return -1
+
+    def _direct(sv):
+        underlying = getattr(sv, "var", None)
+        if underlying is None:
+            return -1
+        ident = getattr(underlying, "identifier", None)
+        for i, pv in enumerate(param_vars):
+            if ident is not None and ident == getattr(pv, "identifier", None):
+                return i
+        return -1
+
+    idx = _direct(ssa_var)
+    if idx >= 0:
+        return idx
+    seen: set = set()
+    cur = ssa_var
+    for _ in range(max_hops):
+        if cur is None:
+            return -1
+        key = str(cur)
+        if key in seen:
+            return -1
+        seen.add(key)
+        defn = ilh.ssa_def_of(func, cur)
+        if defn is None:
+            return -1
+        src = getattr(defn, "src", None)
+        if src is None:
+            return -1
+        nested = ilh.expr_to_ssa_var(src)
+        if nested is None:
+            return -1
+        idx = _direct(nested)
+        if idx >= 0:
+            return idx
+        cur = nested
+    return -1
+
+
+def _ptr_root(func, ssa_var, max_hops: int = 4) -> Optional[tuple]:
+    """Return a stable (kind, identity) pair representing the root of a
+    pointer expression — used to correlate a callee arg with a subsequent
+    free in the caller even when SSA versions differ.
+
+    Returns:
+      ('stack', stack_var_id)  — pointer came from AddressOf(stack_var)
+      ('reg',   var_id)        — pointer is a register/local var (fallback)
+    """
+    if ssa_var is None:
+        return None
+    var = getattr(ssa_var, "var", None)
+    if var is not None:
+        ident = getattr(var, "identifier", None)
+        if ident is not None and ilh._is_stack_var(var):
+            return ("stack", int(ident))
+    # Walk SSA def chain for AddressOf(stack_var)
+    seen: set = set()
+    cur = ssa_var
+    for _ in range(max_hops):
+        if cur is None:
+            break
+        key = str(cur)
+        if key in seen:
+            break
+        seen.add(key)
+        defn = ilh.ssa_def_of(func, cur)
+        if defn is None:
+            break
+        src = getattr(defn, "src", None)
+        if src is None:
+            break
+        op = type(src).__name__
+        if "AddressOf" in op or ("Addr" in op and "Load" not in op):
+            sv = getattr(src, "src", None) or getattr(src, "var", None)
+            if sv is not None and ilh._is_stack_var(sv):
+                stack_ident = getattr(sv, "identifier", None)
+                if stack_ident is not None:
+                    return ("stack", int(stack_ident))
+        nested = ilh.expr_to_ssa_var(src)
+        if nested is None:
+            break
+        cur = nested
+    # Fallback: use var identifier (handles same-register, different-version)
+    if var is not None:
+        ident = getattr(var, "identifier", None)
+        if ident is not None:
+            return ("reg", int(ident))
+    return None
 
 
 def _resolve_to_global_load_addr(function, ssa_var, *, max_hops: int = 4) -> Optional[int]:
@@ -758,6 +930,171 @@ def find_uaf_and_double_free(bv, *, binary: str, arch: str, platform: str,
     return findings
 
 
+def find_struct_field_double_free(bv, *, binary: str, arch: str, platform: str,
+                                   detector: str) -> list[Finding]:
+    """Detect double-free via struct-field aliasing across function boundaries.
+
+    Pattern:
+      void callee(struct *p) { free(p->field); }
+      void caller()          {
+          struct s; ...
+          callee(&s);
+          free(s.field);   // ← double-free
+      }
+
+    Algorithm:
+      Phase 1 — collect every free(Load(param_N + offset)) site across all
+                functions; build callee_frees map.
+                Also build fn_free_sites per-function for Phase 3.
+      Phase 2 — for each tracked callee, enumerate its code refs (call sites);
+                extract the Nth argument from the call instruction and resolve
+                it to a 'root' (stack-var identity via AddressOf walk or var id).
+      Phase 3 — check caller's free sites for matching (root, field_offset);
+                if found, emit double_free.
+    """
+    findings: list[Finding] = []
+    imports = imports_in(bv)
+    if not any(fn in imports for fn in FREE_FUNCTIONS):
+        return findings
+
+    # callee_frees[callee_start] = [(param_idx, field_offset, callee_free_addr, callee_name)]
+    callee_frees: dict[int, list] = {}
+    # fn_free_sites[fn_start] = [(base_ssa, field_offset, free_addr, func_ref)]
+    fn_free_sites: dict[int, list] = {}
+
+    for free_name in FREE_FUNCTIONS:
+        if free_name not in imports:
+            continue
+        for free_addr, mlil_inst in ilh.call_sites_of_import(bv, free_name):
+            if mlil_inst is None:
+                continue
+            params_list = ilh.call_params(mlil_inst)
+            if not params_list:
+                continue
+            func = getattr(mlil_inst, "function", None)
+            if func is None:
+                continue
+            fn_start = ilh.function_key(func)
+            fn_name = ilh.function_display_name(func)
+            if _is_crt_internal(fn_name):
+                continue
+            freed_arg = params_list[0]
+            field = _extract_load_base_offset(freed_arg, func)
+            if field is None:
+                continue
+            (base_ssa, fld_offset) = field
+            fn_free_sites.setdefault(fn_start, []).append(
+                (base_ssa, fld_offset, free_addr, func)
+            )
+            # Check if base_ssa traces to a function parameter
+            fn_src = getattr(func, "source_function", None) or func
+            param_vars = list(getattr(fn_src, "parameter_vars", None) or [])
+            param_idx = _resolve_to_param_idx(func, base_ssa, param_vars)
+            if param_idx < 0:
+                continue
+            callee_frees.setdefault(fn_start, []).append(
+                (param_idx, fld_offset, free_addr, fn_name)
+            )
+
+    if not callee_frees:
+        return findings
+
+    seen_sigs: set = set()
+
+    for callee_start, param_free_list in callee_frees.items():
+        try:
+            refs = list(bv.get_code_refs(callee_start))
+        except Exception:
+            continue
+
+        for ref in refs:
+            caller_addr = int(getattr(ref, "address", 0))
+            if caller_addr == 0:
+                continue
+            caller_fns = bv.get_functions_containing(caller_addr)
+            if not caller_fns:
+                continue
+            caller_fn = caller_fns[0]
+            caller_start = ilh.function_key(caller_fn)
+            caller_name = ilh.function_display_name(caller_fn)
+            if _is_crt_internal(caller_name):
+                continue
+            # Skip if caller has no free sites to correlate
+            caller_free_sites = fn_free_sites.get(caller_start)
+            if not caller_free_sites:
+                continue
+
+            # Locate the MLIL call instruction at caller_addr
+            caller_mlil = getattr(caller_fn, "mlil", None)
+            if caller_mlil is None:
+                continue
+            caller_ssa = getattr(caller_mlil, "ssa_form", None) or caller_mlil
+            call_inst = None
+            try:
+                gi = getattr(caller_ssa, "get_instruction_at", None)
+                if callable(gi):
+                    call_inst = gi(caller_addr)
+            except Exception:
+                pass
+            if call_inst is None:
+                try:
+                    for inst in caller_ssa.instructions:
+                        if int(getattr(inst, "address", -1)) == caller_addr:
+                            call_inst = inst
+                            break
+                except Exception:
+                    pass
+            if call_inst is None:
+                continue
+
+            call_params_list = ilh.call_params(call_inst)
+            call_func_ref = getattr(call_inst, "function", None) or caller_ssa
+
+            for (param_idx, field_offset, callee_free_addr, callee_fn_name) in param_free_list:
+                if param_idx >= len(call_params_list):
+                    continue
+                arg_expr = call_params_list[param_idx]
+                arg_ssa = ilh.expr_to_ssa_var(arg_expr)
+                if arg_ssa is None:
+                    continue
+                arg_root = _ptr_root(call_func_ref, arg_ssa)
+                if arg_root is None:
+                    continue
+
+                for (free_base_ssa, free_offset, local_free_addr, free_func_ref) in caller_free_sites:
+                    if free_offset != field_offset:
+                        continue
+                    free_root = _ptr_root(free_func_ref, free_base_ssa)
+                    if free_root is None or free_root != arg_root:
+                        continue
+                    sig = (caller_start, callee_start, field_offset, local_free_addr)
+                    if sig in seen_sigs:
+                        continue
+                    seen_sigs.add(sig)
+                    findings.append(_emit(
+                        "double_free",
+                        addr=local_free_addr,
+                        function=caller_name,
+                        binary=binary, arch=arch, platform=platform,
+                        detector=detector,
+                        description=(
+                            f"{callee_fn_name}() frees struct field at offset "
+                            f"{field_offset} through its parameter; "
+                            f"{caller_name}() also frees the same field at "
+                            f"0x{local_free_addr:x} — struct-field aliasing"
+                        ),
+                        details={
+                            "pattern": "struct_field_aliasing",
+                            "callee": callee_fn_name,
+                            "field_offset": field_offset,
+                            "callee_call_site": hex(caller_addr),
+                            "callee_free_addr": hex(callee_free_addr),
+                            "second_free_addr": hex(local_free_addr),
+                        },
+                    ))
+    return findings
+
+
 def find_heap_overflow(bv, *, binary: str, arch: str, platform: str,
                       detector: str) -> list[Finding]:
     findings: list[Finding] = []
@@ -976,6 +1313,9 @@ def analyze(session, *, binary: Optional[str] = None,
 
     findings: list[Finding] = []
     findings.extend(find_uaf_and_double_free(
+        bv, binary=binary, arch=arch, platform=platform, detector=detector,
+    ))
+    findings.extend(find_struct_field_double_free(
         bv, binary=binary, arch=arch, platform=platform, detector=detector,
     ))
     findings.extend(find_global_pointer_uaf(
