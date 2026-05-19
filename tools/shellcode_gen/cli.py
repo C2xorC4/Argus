@@ -87,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--lang",
         default="c",
-        choices=("c", "python"),
+        choices=("c", "python", "go", "rust"),
         help="Loader output language  [default: c]",
     )
     p.add_argument(
@@ -129,6 +129,10 @@ def main(argv=None) -> int:
             loader_mod = get_loader(args.loader)
             if args.lang == "python":
                 text = loader_mod.generate_python(data)
+            elif args.lang == "go":
+                text = loader_mod.generate_go(data)
+            elif args.lang == "rust":
+                text = loader_mod.generate_rust(data)
             else:
                 text = loader_mod.generate_c(data)
 

@@ -89,6 +89,42 @@ libpthread.pthread_join(tid, None)
 """
 
 
+_GO_TEMPLATE = """\
+//go:build linux
+
+package main
+
+import (
+\t"runtime"
+\t"syscall"
+\t"unsafe"
+)
+
+{sc_bytes}
+
+func main() {{
+\tmem, err := syscall.Mmap(-1, 0, len(sc),
+\t\tsyscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC,
+\t\tsyscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+\tif err != nil {{
+\t\treturn
+\t}}
+\tcopy(mem, sc)
+
+\tdone := make(chan struct{{}})
+\tgo func() {{
+\t\tdefer close(done)
+\t\truntime.LockOSThread()
+\t\tfuncval := [1]uintptr{{uintptr(unsafe.Pointer(&mem[0]))}}
+\t\tf := *(*func())(unsafe.Pointer(&funcval))
+\t\tf()
+\t}}()
+\t<-done
+\tsyscall.Munmap(mem)
+}}
+"""
+
+
 def generate_c(shellcode: bytes) -> str:
     """Return a compilable C loader using mmap(RWX) + pthread_create."""
     return _C_TEMPLATE.format(sc_array=_render.c_array_literal(shellcode, "sc"))
@@ -97,3 +133,8 @@ def generate_c(shellcode: bytes) -> str:
 def generate_python(shellcode: bytes) -> str:
     """Return a Python ctypes loader using mmap(RWX) + pthread_create."""
     return _PY_TEMPLATE.format(sc_bytes=_render.python_bytes_literal(shellcode, "sc"))
+
+
+def generate_go(shellcode: bytes) -> str:
+    """Return a Go loader using mmap(RWX) + goroutine on a locked OS thread."""
+    return _GO_TEMPLATE.format(sc_bytes=_render.go_bytes_literal(shellcode, "sc"))

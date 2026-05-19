@@ -42,6 +42,7 @@ def load_all_loaders() -> None:
         win_nt_alloc_thread,
         win_split_alloc,
         win_section_map,
+        win_hells_gate,
         linux_mmap_rwx,
         linux_mmap_rw_rx,
     )

