@@ -8,6 +8,8 @@ Examples:
   python -m tools.shellcode_gen --command "whoami" --platform linux --arch x64 --format py_bytes
   python -m tools.shellcode_gen --bin payload.bin --format c_array --output payload.h
   python -m tools.shellcode_gen --command "calc.exe" --format hex --output sc.hex
+  python -m tools.shellcode_gen --command "calc.exe" --loader win_malloc_rwx --lang c --output loader.c
+  python -m tools.shellcode_gen --bin payload.bin --loader linux_mmap_rwx --lang python
 """
 from __future__ import annotations
 
@@ -18,17 +20,19 @@ from pathlib import Path
 from . import generate_from_command, generate_from_bin
 from .formatters import write_output, FORMATS
 from .payloads import _REGISTRY, load_all
+from .loaders import _LOADER_REGISTRY, load_all_loaders
 
 
 def build_parser() -> argparse.ArgumentParser:
     load_all()
-    available = sorted(f"{p}/{a}" for p, a in _REGISTRY)
+    load_all_loaders()
 
     p = argparse.ArgumentParser(
         prog="shellcode_gen",
         description=(
             "Generate shellcode from a command string or a raw .bin file.\n"
-            "Outputs raw bytes, hex, C array, Python bytes literal, or escaped string."
+            "Outputs raw bytes, hex, C array, Python bytes literal, or escaped string.\n"
+            "With --loader, wraps the shellcode in a standalone loader stub."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -63,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="hex",
         choices=FORMATS,
         dest="fmt",
-        help="Output format  [default: hex]",
+        help="Output format (ignored when --loader is set)  [default: hex]",
     )
     p.add_argument(
         "--output", "-o",
@@ -76,9 +80,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Variable name used by c_array / py_bytes formatters  [default: shellcode]",
     )
     p.add_argument(
+        "--loader",
+        metavar="TECHNIQUE",
+        help="Wrap shellcode in a loader stub (see --list for names)",
+    )
+    p.add_argument(
+        "--lang",
+        default="c",
+        choices=("c", "python"),
+        help="Loader output language  [default: c]",
+    )
+    p.add_argument(
         "--list", "-l",
         action="store_true",
-        help="List available platform/arch combinations and exit",
+        help="List available platform/arch combinations and loader techniques, then exit",
     )
     return p
 
@@ -89,9 +104,13 @@ def main(argv=None) -> int:
 
     if args.list:
         load_all()
+        load_all_loaders()
         print("Available platform/arch combinations:")
         for plat, arch in sorted(_REGISTRY):
             print(f"  {plat}/{arch}")
+        print("\nAvailable loader techniques:")
+        for name in sorted(_LOADER_REGISTRY):
+            print(f"  {name}")
         return 0
 
     if not args.list and args.command is None and args.bin_file is None:
@@ -104,13 +123,31 @@ def main(argv=None) -> int:
             data = generate_from_bin(args.bin_file)
 
         dest = Path(args.output) if args.output else None
-        write_output(data, args.fmt, dest=dest, var_name=args.var_name)
 
-        if dest:
-            print(
-                f"[+] {len(data)} bytes written to {dest} ({args.fmt})",
-                file=sys.stderr,
-            )
+        if args.loader:
+            from .loaders import get_loader
+            loader_mod = get_loader(args.loader)
+            if args.lang == "python":
+                text = loader_mod.generate_python(data)
+            else:
+                text = loader_mod.generate_c(data)
+
+            if dest is None:
+                print(text, end="")
+            else:
+                dest.write_text(text, encoding="utf-8")
+                print(
+                    f"[+] {len(data)}b shellcode → {args.loader} loader "
+                    f"({args.lang}) written to {dest}",
+                    file=sys.stderr,
+                )
+        else:
+            write_output(data, args.fmt, dest=dest, var_name=args.var_name)
+            if dest:
+                print(
+                    f"[+] {len(data)} bytes written to {dest} ({args.fmt})",
+                    file=sys.stderr,
+                )
 
     except ImportError as exc:
         print(f"[!] {exc}", file=sys.stderr)
