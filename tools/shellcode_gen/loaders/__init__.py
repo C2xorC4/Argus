@@ -39,6 +39,9 @@ def load_all_loaders() -> None:
         win_heap_exec,
         win_fiber,
         win_apc_self,
+        win_nt_alloc_thread,
+        win_split_alloc,
+        win_section_map,
         linux_mmap_rwx,
         linux_mmap_rw_rx,
     )

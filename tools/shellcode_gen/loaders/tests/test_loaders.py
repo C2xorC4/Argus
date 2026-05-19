@@ -28,10 +28,11 @@ SAMPLE = b"\x90" * 8 + b"\xc3"   # 8× NOP + RET; 9 bytes
 
 class TestRegistry(unittest.TestCase):
 
-    def test_all_seven_loaded(self):
+    def test_all_ten_loaded(self):
         keys = set(_LOADER_REGISTRY.keys())
         for name in ("win_malloc_rwx", "win_rw_rx", "win_heap_exec",
                      "win_fiber", "win_apc_self",
+                     "win_nt_alloc_thread", "win_split_alloc", "win_section_map",
                      "linux_mmap_rwx", "linux_mmap_rw_rx"):
             self.assertIn(name, keys, f"Loader {name!r} not registered")
 
@@ -165,10 +166,110 @@ _LOADER_SPECS = [
      ["mmap", "mprotect", "pthread_create", "PROT_EXEC"],
      ["mmap", "mprotect", "pthread_create"],
      ["#include <sys/mman.h>", "#include <pthread.h>"]),
+
+    ("win_nt_alloc_thread",
+     ["NtAllocateVirtualMemory", "NtProtectVirtualMemory", "NtCreateThreadEx",
+      "GetProcAddress", "check_stub", "4C", "8B", "D1", "0xB8"],
+     ["NtAllocateVirtualMemory", "NtProtectVirtualMemory", "NtCreateThreadEx",
+      "check_stub", "0x4C"],
+     ["#include <windows.h>"]),
+
+    ("win_split_alloc",
+     ["VirtualAlloc", "VirtualProtect", "CreateThread", "CHUNK_SIZE", "TRAMP_SIZE",
+      "0x48", "0xB8", "0xFF", "0xE0"],
+     ["VirtualAlloc", "VirtualProtect", "CreateThread", "CHUNK_SIZE",
+      "\\x48\\xb8", "\\xff\\xe0"],
+     ["#include <windows.h>"]),
+
+    ("win_section_map",
+     ["NtCreateSection", "NtMapViewOfSection", "NtUnmapViewOfSection",
+      "PAGE_EXECUTE_READWRITE", "PAGE_READWRITE", "PAGE_EXECUTE_READ",
+      "SEC_COMMIT", "ViewUnmap"],
+     ["NtCreateSection", "NtMapViewOfSection", "NtUnmapViewOfSection",
+      "PAGE_EXECUTE_READ"],
+     ["#include <windows.h>"]),
 ]
 
 for _name, _c_syms, _py_syms, _headers in _LOADER_SPECS:
     globals()[f"Test_{_name}"] = _make_loader_tests(_name, _c_syms, _py_syms, _headers)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Technique-specific checks
+# ─────────────────────────────────────────────────────────────────
+
+class TestSplitAllocChunkSize(unittest.TestCase):
+
+    def setUp(self):
+        self.mod = get_loader("win_split_alloc")
+
+    def test_custom_chunk_size_c(self):
+        out = self.mod.generate_c(SAMPLE, chunk_size=16)
+        self.assertIn("16", out)
+
+    def test_custom_chunk_size_python(self):
+        out = self.mod.generate_python(SAMPLE, chunk_size=16)
+        self.assertIn("16", out)
+
+    def test_default_chunk_size_present_c(self):
+        out = self.mod.generate_c(SAMPLE)
+        self.assertIn("64", out)
+
+    def test_trampoline_bytes_present_python(self):
+        out = self.mod.generate_python(SAMPLE)
+        # JMP trampoline opcodes
+        self.assertIn("\\xff\\xe0", out)
+        self.assertIn("\\x48\\xb8", out)
+
+
+class TestSectionMapDoubleMap(unittest.TestCase):
+
+    def setUp(self):
+        self.mod = get_loader("win_section_map")
+
+    def test_c_rw_view_before_rx(self):
+        out = self.mod.generate_c(SAMPLE)
+        # Use step comments to identify the two map calls unambiguously
+        rw_pos = out.find("Step 2")
+        rx_pos = out.find("Step 5")
+        self.assertGreater(rx_pos, rw_pos, "RX map (Step 5) should appear after RW map (Step 2)")
+
+    def test_c_unmap_between_views(self):
+        out = self.mod.generate_c(SAMPLE)
+        rw_pos    = out.find("Step 2")
+        unmap_pos = out.find("Step 4")
+        rx_pos    = out.find("Step 5")
+        self.assertLess(rw_pos, unmap_pos)
+        self.assertLess(unmap_pos, rx_pos)
+
+    def test_c_no_virtualalloc_for_payload(self):
+        # win_section_map should not use VirtualAlloc/VirtualProtect for the payload
+        out = self.mod.generate_c(SAMPLE)
+        self.assertNotIn("VirtualAlloc", out)
+        self.assertNotIn("VirtualProtect", out)
+
+
+class TestNtAllocHellsGate(unittest.TestCase):
+
+    def setUp(self):
+        self.mod = get_loader("win_nt_alloc_thread")
+
+    def test_c_contains_stub_verification(self):
+        out = self.mod.generate_c(SAMPLE)
+        # Hell's Gate prologue bytes
+        self.assertIn("0x4C", out)
+        self.assertIn("0x8B", out)
+        self.assertIn("0xD1", out)
+
+    def test_c_no_virtualalloc_for_payload(self):
+        out = self.mod.generate_c(SAMPLE)
+        # VirtualAlloc must NOT appear for the payload allocation
+        self.assertNotIn("VirtualAlloc(", out)
+
+    def test_py_stub_check_present(self):
+        out = self.mod.generate_python(SAMPLE)
+        self.assertIn("check_stub", out)
+        self.assertIn("0x4C", out)
 
 
 # ─────────────────────────────────────────────────────────────────
