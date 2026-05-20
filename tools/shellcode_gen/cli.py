@@ -91,6 +91,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Loader output language  [default: c]",
     )
     p.add_argument(
+        "--staged",
+        action="store_true",
+        help=(
+            "Generate a staged loader that reads shellcode from argv[1] at runtime "
+            "instead of embedding it. Requires --loader."
+        ),
+    )
+    p.add_argument(
         "--list", "-l",
         action="store_true",
         help="List available platform/arch combinations and loader techniques, then exit",
@@ -127,14 +135,15 @@ def main(argv=None) -> int:
         if args.loader:
             from .loaders import get_loader
             loader_mod = get_loader(args.loader)
+            staged = getattr(args, "staged", False)
             if args.lang == "python":
-                text = loader_mod.generate_python(data)
+                text = loader_mod.generate_python(data, staged=staged)
             elif args.lang == "go":
-                text = loader_mod.generate_go(data)
+                text = loader_mod.generate_go(data, staged=staged)
             elif args.lang == "rust":
-                text = loader_mod.generate_rust(data)
+                text = loader_mod.generate_rust(data, staged=staged)
             else:
-                text = loader_mod.generate_c(data)
+                text = loader_mod.generate_c(data, staged=staged)
 
             if dest is None:
                 print(text, end="")

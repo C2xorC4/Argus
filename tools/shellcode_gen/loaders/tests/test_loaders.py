@@ -1,12 +1,13 @@
 """Tests for shellcode_gen loaders.
 
 All tests are execution-free — they verify template correctness only.
-No shellcode is run; samples are simple NOP sleds for structural checks.
+No shellcode is run; samples are simple byte sequences for structural checks.
 """
 from __future__ import annotations
 
 import sys
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,7 +20,9 @@ from tools.shellcode_gen.loaders import get_loader, load_all_loaders, _LOADER_RE
 
 load_all_loaders()
 
-SAMPLE = b"\x90" * 8 + b"\xc3"   # 8× NOP + RET; 9 bytes
+SAMPLE = b"\x90" * 8 + b"\xc3"   # 9 bytes — generic NOP sled + RET
+# Distinctive bytes that won't appear by coincidence in XOR keys or template code
+DISTINCTIVE = b"\xde\xad\xbe\xef" * 4 + b"\xc3"   # 17 bytes
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -76,12 +79,26 @@ def _make_loader_tests(loader_name, required_c_symbols, required_py_symbols,
             self.assertIsInstance(self.c_out, str)
             self.assertGreater(len(self.c_out), 0)
 
-        def test_c_embeds_shellcode_bytes(self):
-            for b in SAMPLE:
-                self.assertIn(f"0x{b:02x}", self.c_out)
+        def test_c_has_xor_decrypt(self):
+            # XOR decrypt loop and key variable must be present
+            self.assertIn("^=", self.c_out)
+            self.assertIn("_sck", self.c_out)
 
-        def test_c_embeds_length(self):
-            self.assertIn(str(len(SAMPLE)), self.c_out)
+        def test_c_no_plaintext_bytes(self):
+            # Plaintext bytes from DISTINCTIVE must not appear consecutively
+            for b in DISTINCTIVE:
+                hex_plain = f"0x{b:02x}"
+                # Allow individual bytes to appear (common hex values), but
+                # at least the exact consecutive sequence must not appear
+                pass
+            out_d = self.mod.generate_c(DISTINCTIVE)
+            plain_seq = ", ".join(f"0x{b:02x}" for b in DISTINCTIVE[:4])
+            self.assertNotIn(plain_seq, out_d,
+                             "Plaintext shellcode bytes visible — encryption not applied")
+
+        def test_c_embeds_sc_len(self):
+            # sc_len constant must be present (some loaders pad, so exact value varies)
+            self.assertIn("sc_len = ", self.c_out)
 
         def test_c_has_required_symbols(self):
             for sym in required_c_symbols:
@@ -103,12 +120,15 @@ def _make_loader_tests(loader_name, required_c_symbols, required_py_symbols,
             self.assertIsInstance(self.py_out, str)
             self.assertGreater(len(self.py_out), 0)
 
-        def test_py_embeds_shellcode_bytes(self):
-            for b in SAMPLE:
-                self.assertIn(f"\\x{b:02x}", self.py_out)
+        def test_py_has_xor_decrypt(self):
+            self.assertIn("_sck", self.py_out)
+            self.assertIn("^ ", self.py_out)
 
-        def test_py_embeds_length(self):
-            self.assertIn(str(len(SAMPLE)), self.py_out)
+        def test_py_no_plaintext_bytes(self):
+            out_d = self.mod.generate_python(DISTINCTIVE)
+            plain_seq = "".join(f"\\x{b:02x}" for b in DISTINCTIVE[:4])
+            self.assertNotIn(plain_seq, out_d,
+                             "Plaintext shellcode bytes visible — encryption not applied")
 
         def test_py_has_import_ctypes(self):
             self.assertIn("import ctypes", self.py_out)
@@ -130,11 +150,19 @@ def _make_loader_tests(loader_name, required_c_symbols, required_py_symbols,
             self.assertIsInstance(self.go_out, str)
             self.assertGreater(len(self.go_out), 0)
 
-        def test_go_embeds_shellcode_bytes(self):
+        def test_go_has_xor_decrypt(self):
             if self.go_out is None:
                 self.skipTest("no generate_go")
-            for b in SAMPLE:
-                self.assertIn(f"0x{b:02x}", self.go_out)
+            self.assertIn("_scKey", self.go_out)
+            self.assertIn("^=", self.go_out)
+
+        def test_go_no_plaintext_bytes(self):
+            if self.go_out is None:
+                self.skipTest("no generate_go")
+            out_d = self.mod.generate_go(DISTINCTIVE)
+            plain_seq = ", ".join(f"0x{b:02x}" for b in DISTINCTIVE[:4])
+            self.assertNotIn(plain_seq, out_d,
+                             "Plaintext shellcode bytes visible — encryption not applied")
 
         def test_go_has_package_main(self):
             if self.go_out is None:
@@ -156,11 +184,19 @@ def _make_loader_tests(loader_name, required_c_symbols, required_py_symbols,
             self.assertIsInstance(self.rs_out, str)
             self.assertGreater(len(self.rs_out), 0)
 
-        def test_rs_embeds_shellcode_bytes(self):
+        def test_rs_has_xor_decrypt(self):
             if self.rs_out is None:
                 self.skipTest("no generate_rust")
-            for b in SAMPLE:
-                self.assertIn(f"0x{b:02x}", self.rs_out)
+            self.assertIn("_sck", self.rs_out)
+            self.assertIn("^=", self.rs_out)
+
+        def test_rs_no_plaintext_bytes(self):
+            if self.rs_out is None:
+                self.skipTest("no generate_rust")
+            out_d = self.mod.generate_rust(DISTINCTIVE)
+            plain_seq = ", ".join(f"0x{b:02x}" for b in DISTINCTIVE[:4])
+            self.assertNotIn(plain_seq, out_d,
+                             "Plaintext shellcode bytes visible — encryption not applied")
 
         def test_rs_has_fn_main(self):
             if self.rs_out is None:
@@ -182,6 +218,12 @@ def _make_loader_tests(loader_name, required_c_symbols, required_py_symbols,
             py2 = self.mod.generate_python(other)
             self.assertNotEqual(self.c_out, c2)
             self.assertNotEqual(self.py_out, py2)
+
+        def test_same_shellcode_differs_each_call(self):
+            # Per-build random key means two calls produce different output
+            c2 = self.mod.generate_c(SAMPLE)
+            self.assertNotEqual(self.c_out, c2,
+                                "generate_c returned identical output on two calls — key not random")
 
     _LoaderTest.__name__ = f"Test_{loader_name}"
     _LoaderTest.__qualname__ = f"Test_{loader_name}"
@@ -305,6 +347,80 @@ for _spec in _LOADER_SPECS:
 
 
 # ─────────────────────────────────────────────────────────────────
+# Staged loader checks
+# ─────────────────────────────────────────────────────────────────
+
+class TestStagedLoaders(unittest.TestCase):
+    """Staged variants must read shellcode from a file path, not embed it."""
+
+    _WIN_LOADERS = [
+        "win_malloc_rwx", "win_rw_rx", "win_heap_exec",
+        "win_fiber", "win_apc_self", "win_nt_alloc_thread",
+        "win_split_alloc", "win_section_map", "win_hells_gate",
+    ]
+
+    def _check_no_embedded_bytes(self, src: str, label: str):
+        """Staged output must not contain the DISTINCTIVE bytes."""
+        plain_seq = ", ".join(f"0x{b:02x}" for b in DISTINCTIVE[:4])
+        self.assertNotIn(plain_seq, src,
+                         f"{label}: embedded shellcode bytes found in staged output")
+
+    def test_c_staged_has_file_read(self):
+        for name in self._WIN_LOADERS:
+            mod = get_loader(name)
+            out = mod.generate_c(DISTINCTIVE, staged=True)
+            self.assertIn("argv[1]", out, f"{name}: C staged missing argv[1]")
+            self.assertIn("fopen", out, f"{name}: C staged missing fopen")
+            self._check_no_embedded_bytes(out, f"{name}/C")
+
+    def test_c_staged_has_argc_argv_main(self):
+        mod = get_loader("win_malloc_rwx")
+        out = mod.generate_c(SAMPLE, staged=True)
+        self.assertIn("argc", out)
+        self.assertIn("argv", out)
+
+    def test_go_staged_has_file_read(self):
+        for name in self._WIN_LOADERS:
+            mod = get_loader(name)
+            out = mod.generate_go(DISTINCTIVE, staged=True)
+            self.assertIn("os.ReadFile", out, f"{name}: Go staged missing os.ReadFile")
+            self.assertIn('"os"', out, f"{name}: Go staged missing os import")
+            self._check_no_embedded_bytes(out, f"{name}/Go")
+
+    def test_rust_staged_has_file_read(self):
+        for name in self._WIN_LOADERS:
+            mod = get_loader(name)
+            out = mod.generate_rust(DISTINCTIVE, staged=True)
+            self.assertIn("std::fs::read", out, f"{name}: Rust staged missing std::fs::read")
+            self.assertIn("std::env::args", out, f"{name}: Rust staged missing std::env::args")
+            self._check_no_embedded_bytes(out, f"{name}/Rust")
+
+    def test_python_staged_has_file_read(self):
+        for name in self._WIN_LOADERS:
+            mod = get_loader(name)
+            out = mod.generate_python(DISTINCTIVE, staged=True)
+            self.assertIn("sys.argv", out, f"{name}: Python staged missing sys.argv")
+
+    def test_linux_staged_c(self):
+        for name in ("linux_mmap_rwx", "linux_mmap_rw_rx"):
+            mod = get_loader(name)
+            out = mod.generate_c(DISTINCTIVE, staged=True)
+            self.assertIn("argv[1]", out, f"{name}: C staged missing argv[1]")
+
+    def test_linux_staged_go(self):
+        for name in ("linux_mmap_rwx", "linux_mmap_rw_rx"):
+            mod = get_loader(name)
+            out = mod.generate_go(DISTINCTIVE, staged=True)
+            self.assertIn("os.ReadFile", out, f"{name}: Go staged missing os.ReadFile")
+
+    def test_staged_and_embedded_differ(self):
+        mod = get_loader("win_malloc_rwx")
+        embedded = mod.generate_go(SAMPLE)
+        staged   = mod.generate_go(SAMPLE, staged=True)
+        self.assertNotEqual(embedded, staged)
+
+
+# ─────────────────────────────────────────────────────────────────
 # Technique-specific checks
 # ─────────────────────────────────────────────────────────────────
 
@@ -343,7 +459,6 @@ class TestSplitAllocChunkSize(unittest.TestCase):
 
     def test_trampoline_bytes_present_python(self):
         out = self.mod.generate_python(SAMPLE)
-        # JMP trampoline opcodes
         self.assertIn("\\x41\\xff\\xe3", out)
         self.assertIn("\\x49\\xbb", out)
 
@@ -367,7 +482,6 @@ class TestSectionMapDoubleMap(unittest.TestCase):
 
     def test_c_rw_view_before_rx(self):
         out = self.mod.generate_c(SAMPLE)
-        # Use step comments to identify the two map calls unambiguously
         rw_pos = out.find("Step 2")
         rx_pos = out.find("Step 5")
         self.assertGreater(rx_pos, rw_pos, "RX map (Step 5) should appear after RW map (Step 2)")
@@ -381,7 +495,6 @@ class TestSectionMapDoubleMap(unittest.TestCase):
         self.assertLess(unmap_pos, rx_pos)
 
     def test_c_no_virtualalloc_for_payload(self):
-        # win_section_map should not use VirtualAlloc/VirtualProtect for the payload
         out = self.mod.generate_c(SAMPLE)
         self.assertNotIn("VirtualAlloc", out)
         self.assertNotIn("VirtualProtect", out)
@@ -394,14 +507,12 @@ class TestNtAllocHellsGate(unittest.TestCase):
 
     def test_c_contains_stub_verification(self):
         out = self.mod.generate_c(SAMPLE)
-        # Hell's Gate prologue bytes
         self.assertIn("0x4C", out)
         self.assertIn("0x8B", out)
         self.assertIn("0xD1", out)
 
     def test_c_no_virtualalloc_for_payload(self):
         out = self.mod.generate_c(SAMPLE)
-        # VirtualAlloc must NOT appear for the payload allocation
         self.assertNotIn("VirtualAlloc(", out)
 
     def test_py_stub_check_present(self):
@@ -416,8 +527,6 @@ class TestHellsGate(unittest.TestCase):
         self.mod = get_loader("win_hells_gate")
 
     def test_c_no_hook_byte_read(self):
-        # Hell's Gate (nt_alloc_thread) reads 4C 8B D1 B8 to detect hooks;
-        # win_hells_gate uses RVA sort only — no prologue-byte check in C output.
         out = self.mod.generate_c(SAMPLE)
         self.assertNotIn("check_stub", out)
 
@@ -434,15 +543,12 @@ class TestHellsGate(unittest.TestCase):
 
     def test_c_stub_bytes(self):
         out = self.mod.generate_c(SAMPLE)
-        # mov r10,rcx + mov eax,ssn prefix bytes
         self.assertIn("0x4C", out)
         self.assertIn("0x8B", out)
         self.assertIn("0xD1", out)
 
     def test_c_no_virtualalloc_for_payload(self):
-        # VirtualAlloc is used only for stub page, not for shellcode buffer
         out = self.mod.generate_c(SAMPLE)
-        # NtAllocateVirtualMemory should be present for shellcode
         self.assertIn("NtAllocateVirtualMemory", out)
 
     def test_py_rva_sort(self):
@@ -453,12 +559,12 @@ class TestHellsGate(unittest.TestCase):
     def test_py_gadget_scan(self):
         out = self.mod.generate_python(SAMPLE)
         self.assertIn("\\x0f\\x05\\xc3", out)
-        self.assertIn("0x20000000", out)   # IMAGE_SCN_MEM_EXECUTE
+        self.assertIn("0x20000000", out)
 
     def test_py_stub_encoding(self):
         out = self.mod.generate_python(SAMPLE)
         self.assertIn("\\x4c\\x8b\\xd1", out)
-        self.assertIn("\\xff\\x25", out)   # jmp [rip+0] prefix
+        self.assertIn("\\xff\\x25", out)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -490,6 +596,90 @@ class TestLoaderCLI(unittest.TestCase):
             self.assertEqual(rc, 0)
         finally:
             os.unlink(path)
+
+    def test_loader_go_from_bin(self):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+            f.write(SAMPLE)
+            path = f.name
+        try:
+            rc = self._run(["--bin", path, "--loader", "win_malloc_rwx", "--lang", "go"])
+            self.assertEqual(rc, 0)
+        finally:
+            os.unlink(path)
+
+    def test_loader_rust_from_bin(self):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+            f.write(SAMPLE)
+            path = f.name
+        try:
+            rc = self._run(["--bin", path, "--loader", "win_malloc_rwx", "--lang", "rust"])
+            self.assertEqual(rc, 0)
+        finally:
+            os.unlink(path)
+
+    def test_loader_staged_c(self):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+            f.write(SAMPLE)
+            path = f.name
+        try:
+            rc = self._run(["--bin", path, "--loader", "win_malloc_rwx",
+                            "--lang", "c", "--staged"])
+            self.assertEqual(rc, 0)
+        finally:
+            os.unlink(path)
+
+    def test_loader_staged_go(self):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+            f.write(SAMPLE)
+            path = f.name
+        try:
+            rc = self._run(["--bin", path, "--loader", "win_rw_rx",
+                            "--lang", "go", "--staged"])
+            self.assertEqual(rc, 0)
+        finally:
+            os.unlink(path)
+
+    def test_loader_staged_rust(self):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+            f.write(SAMPLE)
+            path = f.name
+        try:
+            rc = self._run(["--bin", path, "--loader", "win_apc_self",
+                            "--lang", "rust", "--staged"])
+            self.assertEqual(rc, 0)
+        finally:
+            os.unlink(path)
+
+    def test_staged_output_has_file_read(self):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+            f.write(SAMPLE)
+            bin_path = f.name
+        out_path = bin_path + ".go"
+        try:
+            rc = self._run(["--bin", bin_path, "--loader", "win_malloc_rwx",
+                            "--lang", "go", "--staged", "--output", out_path])
+            self.assertEqual(rc, 0)
+            content = Path(out_path).read_text()
+            self.assertIn("os.ReadFile", content)
+        finally:
+            os.unlink(bin_path)
+            if Path(out_path).exists():
+                os.unlink(out_path)
+
+    def test_raw_format_produces_bin(self):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+            f.write(SAMPLE)
+            bin_path = f.name
+        out_path = bin_path + ".out"
+        try:
+            rc = self._run(["--bin", bin_path, "--format", "raw", "--output", out_path])
+            self.assertEqual(rc, 0)
+            data = Path(out_path).read_bytes()
+            self.assertEqual(data, SAMPLE)
+        finally:
+            os.unlink(bin_path)
+            if Path(out_path).exists():
+                os.unlink(out_path)
 
     def test_unknown_loader_returns_nonzero(self):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:

