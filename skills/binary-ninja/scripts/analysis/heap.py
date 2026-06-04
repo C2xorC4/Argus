@@ -1124,7 +1124,8 @@ def _infer_allocation_type(bv, output_var):
     return None
 
 
-def _enrich_with_struct_pointer_field(bv, finding, output_var) -> None:
+def _enrich_with_struct_pointer_field(bv, finding, output_var,
+                                       copy_len_expr=None) -> None:
     """Annotate a heap_buffer_overflow Finding with struct pointer-field info.
 
     Sets finding.details['struct_has_pointer_field'] to:
@@ -1133,12 +1134,23 @@ def _enrich_with_struct_pointer_field(bv, finding, output_var) -> None:
       None  — type is unknown (Binja has no type info for this alloc site)
 
     When True, also sets finding.details['pointer_field_offsets'] with the
-    byte offsets of each pointer-typed member. This annotation is consumed by
-    the composition graph edge:
-      heap_buffer_overflow → arbitrary_write (condition: struct_has_pointer_field)
+    byte offsets of each pointer-typed member.
+
+    If copy_len_expr is a MLIL constant expression, also sets
+    finding.details['overflow_size'] to its integer value. This annotation
+    feeds the composition graph size-constraint demotion check:
+      heap_buffer_overflow → arbitrary_write (size_constraint_detail_key)
     """
     if finding is None:
         return
+    # Populate overflow_size if the copy-length is a statically-known constant.
+    if copy_len_expr is not None:
+        const_val = getattr(copy_len_expr, "constant", None)
+        if const_val is not None:
+            try:
+                finding.details["overflow_size"] = int(const_val)
+            except (TypeError, ValueError):
+                pass
     struct_type = _infer_allocation_type(bv, output_var)
     if struct_type is None:
         finding.details["struct_has_pointer_field"] = None
@@ -1229,8 +1241,10 @@ def find_heap_overflow(bv, *, binary: str, arch: str, platform: str,
             # Future iteration: gate further with allocate-before-read
             # CFG primitive.
             mismatch_reason = "no length argument (unbounded copy)"
+            len_expr = None
             if len_idx is not None and len_idx < len(params):
-                len_var = ilh.expr_to_ssa_var(params[len_idx])
+                len_expr = params[len_idx]
+                len_var = ilh.expr_to_ssa_var(len_expr)
                 len_str = _ssa_var_str(len_var) if len_var else ""
                 if len_str and len_str == alloc["size_var_str"]:
                     continue
@@ -1259,7 +1273,8 @@ def find_heap_overflow(bv, *, binary: str, arch: str, platform: str,
                     "copy_addr": hex(addr),
                 },
             )
-            _enrich_with_struct_pointer_field(bv, finding, alloc.get("output_var"))
+            _enrich_with_struct_pointer_field(bv, finding, alloc.get("output_var"),
+                                               copy_len_expr=len_expr)
             findings.append(finding)
 
     return findings

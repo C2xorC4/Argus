@@ -44,9 +44,11 @@ from typing import Optional
 from ..heuristics import chains as heur_chains
 from ..output.finding import Finding
 from . import crypto as crypto_mod
+from . import format_string as format_string_mod
 from . import heap as heap_mod
 from . import mitigations as mitigations_mod
 from . import obfuscation as obfuscation_mod
+from . import stack as stack_mod
 from . import surface as surface_mod
 from . import taint as taint_mod
 
@@ -71,6 +73,14 @@ def _gather_upstream(session, *, binary, arch, platform) -> list[Finding]:
         score_against_mitigations=False,
     ))
     findings.extend(obfuscation_mod.analyze(
+        session, binary=binary, arch=arch, platform=platform,
+        score_against_mitigations=False,
+    ))
+    findings.extend(stack_mod.analyze(
+        session, binary=binary, arch=arch, platform=platform,
+        score_against_mitigations=False,
+    ))
+    findings.extend(format_string_mod.analyze(
         session, binary=binary, arch=arch, platform=platform,
         score_against_mitigations=False,
     ))

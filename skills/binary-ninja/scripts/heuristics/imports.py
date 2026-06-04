@@ -191,6 +191,17 @@ SINKS: list[tuple[str, int, str]] = [
     ("VirtualAlloc", 1, "alloc_size"),
     ("operator new",      0, "alloc_size"),
     ("operator new[]",    0, "alloc_size"),
+    # Windows kernel pool allocators — NumberOfBytes at index 1 for all.
+    # ExAllocatePool / ExAllocatePoolWithQuota are deprecated since WDK 21H1
+    # (no NX page pool enforcement). All variants are tracked so pool overflows
+    # feed find_heap_overflow() via ALLOC_FUNCTIONS.
+    ("ExAllocatePool",                  1, "alloc_size"),
+    ("ExAllocatePoolWithTag",           1, "alloc_size"),
+    ("ExAllocatePoolWithTagPriority",   1, "alloc_size"),
+    ("ExAllocatePool2",                 1, "alloc_size"),
+    ("ExAllocatePool3",                 1, "alloc_size"),
+    ("ExAllocatePoolWithQuota",         1, "alloc_size"),
+    ("ExAllocatePoolWithQuotaTag",      1, "alloc_size"),
 
     # ── Linux kernel — scatter-gather write at offset ────────────
     # CVE-2026-31431 ("copy.fail") shape: scatterwalk_map_and_copy
@@ -361,11 +372,48 @@ HAL_DISPATCH_TABLE_OVERWRITE: ImportPattern = ImportPattern(
 
 
 # ─────────────────────────────────────────────────────────────────
+# E11 — Deprecated Windows kernel pool allocator indicator
+#
+# ExAllocatePool / ExAllocatePoolWithQuota are deprecated since WDK 21H1:
+# they do not support NX page pool (NonPagedPoolNx), leaving allocated
+# chunks executable — a prerequisite for the kernel shellcode / CFG
+# bypass exploitation path. Presence in a third-party driver is a
+# low-severity indicator warranting review.
+# ─────────────────────────────────────────────────────────────────
+
+
+DEPRECATED_POOL_API_PATTERN: ImportPattern = ImportPattern(
+    name="imports.deprecated_pool_api",
+    description=(
+        "ExAllocatePool / ExAllocatePoolWithQuota — legacy pool allocator "
+        "without NX page pool enforcement; deprecated since WDK 21H1. "
+        "Allocated chunks are executable (NonPagedPool, not NonPagedPoolNx), "
+        "enabling kernel shellcode execution. Presence in a non-Microsoft "
+        "driver warrants review for pool overflow or arbitrary-execution paths."
+    ),
+    severity=Severity.LOW,
+    category="kernel_deprecated_pool_api",
+    cwe=["CWE-757"],
+    mitre_attack=["T1068"],
+    knowledge_refs=["[[Memory/Knowledge/gke_windows_driver_exploitation]]"],
+    cia_impact=frozenset({"I"}),
+    detection_altitude="indicator",
+    import_names=["ExAllocatePool", "ExAllocatePoolWithQuota"],
+    all_required=False,
+    negative_context={
+        "module_name_prefix_any": ["ntoskrnl", "hal.", "ntdll"],
+    },
+)
+
+
+# ─────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────
 
 
-PATTERNS: list[Pattern] = list(BANNED) + [HAL_DISPATCH_TABLE_OVERWRITE]
+PATTERNS: list[Pattern] = (
+    list(BANNED) + [HAL_DISPATCH_TABLE_OVERWRITE, DEPRECATED_POOL_API_PATTERN]
+)
 
 
 def match(bv, *, binary: str, arch: str, platform: str,
