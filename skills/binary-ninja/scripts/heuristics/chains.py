@@ -79,6 +79,7 @@ EAC_PERMISSIVE_PREWRITE_CACHE = ChainPattern(
     cwe=["CWE-732", "CWE-471", "CWE-459", "CWE-345"],
     mitre_attack=["T1574", "T1068"],
     knowledge_refs=["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
+    cia_impact=frozenset({"C", "I"}),
     primitives=[
         "permissive_sddl",
         "pre_verification_write",
@@ -116,6 +117,7 @@ UE5_PRNG_COOKIE_AMPLIFICATION = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-338", "CWE-345", "CWE-770"],
     mitre_attack=["T1499"],
+    cia_impact=frozenset({"A"}),
     knowledge_refs=[
         "[[Memory/Knowledge/ue5_server_crash_chain_prng_fstring]]",
         "[[Memory/Knowledge/ue5_prng_handshake_secret_recovery]]",
@@ -161,6 +163,7 @@ CLASSIC_INFOLEAK_UAF_ROP = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-416", "CWE-200"],
     mitre_attack=["T1203"],
+    cia_impact=frozenset({"C", "I", "A"}),
     knowledge_refs=[
         "[[Memory/Knowledge/wnapi_heap_internals]]",
         "[[Memory/Knowledge/em_advanced_injection_variants]]",
@@ -185,6 +188,7 @@ CLASSIC_FMTLEAK_STACK_ROP = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-134", "CWE-121"],
     mitre_attack=["T1203"],
+    cia_impact=frozenset({"C", "I", "A"}),
     knowledge_refs=[],
     primitives=[
         "format_string",
@@ -206,6 +210,7 @@ CLASSIC_HEAPOF_VTABLE_ROP = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-122", "CWE-843"],
     mitre_attack=["T1203"],
+    cia_impact=frozenset({"I", "A"}),
     knowledge_refs=["[[Memory/Knowledge/wnapi_heap_internals]]"],
     primitives=[
         "heap_buffer_overflow",
@@ -227,6 +232,7 @@ TOCTOU_JUNCTION_SYSTEM_WRITE = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-367", "CWE-732"],
     mitre_attack=["T1574.005"],
+    cia_impact=frozenset({"C", "I"}),
     knowledge_refs=["[[Memory/Knowledge/eac_eos_arbitrary_write_chain]]"],
     primitives=[
         "toctou",
@@ -248,6 +254,7 @@ TYPECONF_ARBREAD_DEREF = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-843", "CWE-125"],
     mitre_attack=["T1203"],
+    cia_impact=frozenset({"C", "I", "A"}),
     knowledge_refs=[
         "[[Memory/Knowledge/ec_undefined_behavior_taxonomy]]",
         "[[Memory/Knowledge/bhg_unsafe_pointer_patterns]]",
@@ -269,6 +276,7 @@ DESERIALIZATION_GADGET_RCE = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-502"],
     mitre_attack=["T1190"],
+    cia_impact=frozenset({"C", "I", "A"}),
     knowledge_refs=[],
     primitives=["insecure_deserialization"],
     ordered=False,
@@ -292,6 +300,7 @@ EGG_HUNTING_SETUP = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-94", "CWE-338"],
     mitre_attack=["T1203"],
+    cia_impact=frozenset({"C", "I", "A"}),
     knowledge_refs=[
         "[[Memory/Knowledge/linux_egghunting_shellcode]]",
         "[[Memory/Knowledge/linux_seccomp_filter]]",
@@ -321,6 +330,7 @@ RET2WIN_ROP_CHAIN = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-121", "CWE-94"],
     mitre_attack=["T1203"],
+    cia_impact=frozenset({"C", "I", "A"}),
     knowledge_refs=[
         "[[Memory/Knowledge/linux_ret2win_pattern]]",
     ],
@@ -350,6 +360,7 @@ SCAN_RESISTANT_EGG_HUNT = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-94"],
     mitre_attack=["T1203"],
+    cia_impact=frozenset({"C", "I", "A"}),
     knowledge_refs=[
         "[[Memory/Knowledge/linux_egghunting_shellcode]]",
     ],
@@ -378,6 +389,7 @@ RET2SHELLCODE_CHAIN = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-94", "CWE-121"],
     mitre_attack=["T1203"],
+    cia_impact=frozenset({"C", "I", "A"}),
     knowledge_refs=["[[Memory/Knowledge/linux_ret2shellcode_pattern]]"],
     primitives=["ret2shellcode_exec"],
     ordered=False,
@@ -402,6 +414,7 @@ VARIABLE_OVERWRITE_CHAIN = ChainPattern(
     category="chain_pattern",
     cwe=["CWE-121"],
     mitre_attack=["T1203"],
+    cia_impact=frozenset({"I"}),
     knowledge_refs=[],
     primitives=["adjacent_variable_overwrite"],
     ordered=False,
@@ -421,6 +434,7 @@ MALWARE_EVASION_STACK = ChainPattern(
     category="chain_pattern",
     cwe=[],
     mitre_attack=["T1106", "T1027", "T1622"],
+    cia_impact=frozenset({"I"}),
     knowledge_refs=[
         "[[Memory/Knowledge/em_direct_syscall_ssn_resolution]]",
         "[[Memory/Knowledge/em_covert_execution_tls_seh]]",
@@ -431,6 +445,37 @@ MALWARE_EVASION_STACK = ChainPattern(
         "hidden_from_debugger_thread",
     ],
     ordered=False,
+)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Controlled-write amplifies read — GKE Ch.9 combined attack
+# ─────────────────────────────────────────────────────────────────
+
+
+CONTROLLED_WRITE_AMPLIFIES_READ = ChainPattern(
+    name="chains.controlled_write_amplifies_read",
+    description=(
+        "Limited controlled-write redirects a kernel/heap read pointer → "
+        "infoleak (GKE Ch.9 write-amplifies-read primitive). A restricted "
+        "integrity bug composes with a restricted confidentiality bug to "
+        "produce an amplified leak that neither primitive enables alone. "
+        "Pattern fires on co-presence; data-flow connection requires human "
+        "triage — write target must overlap with a subsequent read source."
+    ),
+    severity=Severity.HIGH,
+    category="chain_pattern",
+    cwe=["CWE-123", "CWE-200"],
+    mitre_attack=["T1212"],
+    knowledge_refs=[
+        "[[Memory/Knowledge/gke_kernel_evolution]]",
+        "[[Memory/Knowledge/gke_kernel_exploitation_mechanics]]",
+    ],
+    cia_impact=frozenset({"C", "I"}),
+    primitives=["controlled_write", "infoleak"],
+    ordered=False,
+    min_primitives=2,
+    min_per_primitive={"controlled_write": 1, "infoleak": 1},
 )
 
 
@@ -454,6 +499,7 @@ PATTERNS: list[Pattern] = [
     SCAN_RESISTANT_EGG_HUNT,
     RET2SHELLCODE_CHAIN,
     VARIABLE_OVERWRITE_CHAIN,
+    CONTROLLED_WRITE_AMPLIFIES_READ,
 ]
 
 

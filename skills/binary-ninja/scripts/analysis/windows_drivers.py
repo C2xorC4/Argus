@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..output.finding import Finding, Severity, Evidence
+from . import _il_helpers as ilh
+from ..heuristics._base import imports_in
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -554,6 +556,265 @@ def discover_ioctl_handlers(bv) -> list[int]:
 # ─────────────────────────────────────────────────────────────────
 
 
+# ─────────────────────────────────────────────────────────────────
+# E8 — ProbeForRead/ProbeForWrite with integer arithmetic on size arg
+# ─────────────────────────────────────────────────────────────────
+
+
+_PROBE_FUNCTIONS = {"ProbeForRead", "ProbeForWrite"}
+# ProbeFor* Length is arg index 1 (0-based):
+#   VOID ProbeForRead(const VOID* Address, SIZE_T Length, ULONG Alignment)
+_PROBE_LENGTH_ARG_IDX = 1
+
+# MLIL arithmetic opcode substrings that indicate integer math on the
+# taint path. Binja uses names like MediumLevelILAdd, ...Mul, ...Sub, etc.
+_ARITH_OP_NAMES = ("Add", "Mul", "Sub", "Lsl", "Asr", "Lsr", "And", "Or", "Xor")
+
+
+def _ssa_def_chain_has_arithmetic(func, ssa_var, max_hops: int = 8) -> bool:
+    """Return True if the SSA def chain for `ssa_var` contains any arithmetic op.
+
+    Walks SSA defs up to max_hops looking for binary operations. If any
+    arithmetic is found, returns True — the size argument was computed rather
+    than passed verbatim, which is the integer-wraparound bypass precondition.
+    """
+    if func is None or ssa_var is None:
+        return False
+    seen: set = set()
+    frontier = [ssa_var]
+    while frontier and len(seen) < max_hops:
+        cur = frontier.pop()
+        key = str(cur)
+        if key in seen:
+            continue
+        seen.add(key)
+        defn = ilh.ssa_def_of(func, cur)
+        if defn is None:
+            continue
+        src = getattr(defn, "src", None)
+        if src is None:
+            continue
+        op_name = type(src).__name__
+        # Direct arithmetic operation
+        if any(op in op_name for op in _ARITH_OP_NAMES):
+            return True
+        # Chase SSA vars in left/right operands
+        for attr in ("left", "right", "src", "operands"):
+            sub = getattr(src, attr, None)
+            if sub is None:
+                continue
+            if isinstance(sub, (list, tuple)):
+                for s in sub:
+                    sv = ilh.expr_to_ssa_var(s)
+                    if sv is not None:
+                        frontier.append(sv)
+            else:
+                sv = ilh.expr_to_ssa_var(sub)
+                if sv is not None:
+                    frontier.append(sv)
+    return False
+
+
+def _find_probe_size_wraparound(
+    bv, *, binary: str, arch: str, platform: str, detector: str
+) -> list[Finding]:
+    """E8: ProbeForRead/ProbeForWrite with arithmetic on size argument.
+
+    Integer wraparound bypass: if Length = user_value * element_size
+    (or similar arithmetic), the probe validates the wrapped result —
+    not the pre-wrap value. GKE Ch.6 DVWD analysis.
+    """
+    findings: list[Finding] = []
+    imported = imports_in(bv)
+    if not any(fn in imported for fn in _PROBE_FUNCTIONS):
+        return findings
+
+    for probe_name in _PROBE_FUNCTIONS:
+        if probe_name not in imported:
+            continue
+        for addr, mlil in ilh.call_sites_of_import(bv, probe_name):
+            if mlil is None:
+                continue
+            params = ilh.call_params(mlil)
+            if len(params) <= _PROBE_LENGTH_ARG_IDX:
+                continue
+            length_expr = params[_PROBE_LENGTH_ARG_IDX]
+            func = getattr(mlil, "function", None)
+            length_ssa = ilh.expr_to_ssa_var(length_expr)
+            # Also check if the length expression itself is arithmetic
+            len_op = type(length_expr).__name__
+            has_arith = (
+                any(op in len_op for op in _ARITH_OP_NAMES)
+                or _ssa_def_chain_has_arithmetic(func, length_ssa)
+            )
+            if not has_arith:
+                continue
+            fname = ilh.function_display_name(func)
+            findings.append(Finding(
+                id="",
+                category="heap_integer_overflow",
+                severity=Severity.HIGH,
+                address=addr,
+                function=fname,
+                binary=binary,
+                arch=arch,
+                platform=platform,
+                detector=detector,
+                knowledge_refs=["[[Memory/Knowledge/gke_windows_driver_exploitation]]"],
+                cwe=["CWE-190", "CWE-119"],
+                mitre_attack=["T1068"],
+                cia_impact=frozenset({"I"}),
+                detection_altitude="ttp",
+                description=(
+                    f"{probe_name} at 0x{addr:x} in {fname} — "
+                    f"Length argument has arithmetic ops in its def chain; "
+                    f"integer wraparound may bypass probe validation "
+                    f"(GKE Ch.6 DVWD wraparound bypass)"
+                ),
+                details={
+                    "probe_function": probe_name,
+                    "length_arg_idx": _PROBE_LENGTH_ARG_IDX,
+                    "arithmetic_in_def_chain": True,
+                    "pattern": "e8_probe_size_wraparound",
+                },
+            ))
+
+    return findings
+
+
+# ─────────────────────────────────────────────────────────────────
+# E9 — METHOD_NEITHER IOCTL handler accessing user buffer without ProbeForRead
+# ─────────────────────────────────────────────────────────────────
+
+
+# METHOD_NEITHER: IOCTL transfer type bits (bits 0-1) == 0b11
+_METHOD_NEITHER_MASK = 0x3
+_METHOD_NEITHER_VALUE = 0x3
+
+# IO_STACK_LOCATION.Parameters.DeviceIoControl offsets (x64 kernel)
+# Type3InputBuffer is at +0x20 from the Parameters union start.
+# The union itself starts at +0x08 within IO_STACK_LOCATION.
+# Combined offset = 0x08 + 0x20 = 0x28 from IO_STACK_LOCATION base.
+_TYPE3_INPUT_BUFFER_OFFSET = 0x28
+
+
+def _function_calls_probe(func) -> bool:
+    """Return True if `func` calls ProbeForRead or ProbeForWrite anywhere."""
+    if func is None:
+        return False
+    mlil = getattr(func, "mlil", None)
+    if mlil is None:
+        return False
+    try:
+        for inst in mlil.instructions:
+            if ilh.is_sink_call_to(inst, _PROBE_FUNCTIONS):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _handler_accesses_type3_buffer(func, bv) -> bool:
+    """Return True if `func` accesses memory at the Type3InputBuffer offset.
+
+    Looks for Load/Store whose source contains a constant offset matching
+    _TYPE3_INPUT_BUFFER_OFFSET from a parameter (the IRP stack location).
+    Simple heuristic: scan for the constant 0x28 used as an offset in
+    pointer arithmetic within the function.
+    """
+    if func is None:
+        return False
+    mlil = getattr(func, "mlil", None)
+    if mlil is None:
+        return False
+    ssa = getattr(mlil, "ssa_form", None) or mlil
+    try:
+        for inst in ssa.instructions:
+            # Look for any instruction that contains the Type3InputBuffer offset
+            # as a constant in a Load or AddressOf expression.
+            op_name = type(inst).__name__
+            if "Load" not in op_name and "Store" not in op_name and "SetVar" not in op_name:
+                continue
+            src = getattr(inst, "src", None) or getattr(inst, "dest", None)
+            if src is None:
+                continue
+            # Walk to check for Add(ptr, 0x28) pattern
+            for sub_attr in ("left", "right", "src", "operands"):
+                sub = getattr(src, sub_attr, None)
+                if sub is None:
+                    continue
+                cval = getattr(sub, "constant", None)
+                if cval is not None:
+                    try:
+                        if int(cval) == _TYPE3_INPUT_BUFFER_OFFSET:
+                            return True
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return False
+
+
+def _find_neither_io_without_probe(
+    bv, *, binary: str, arch: str, platform: str, detector: str,
+    dispatch_table: Optional["DispatchTable"] = None,
+) -> list[Finding]:
+    """E9: METHOD_NEITHER IOCTL handler accessing user buffer without ProbeForRead.
+
+    METHOD_NEITHER (IOCTL transfer-type bits 0-1 = 0b11) passes the user
+    buffer pointer in Type3InputBuffer without kernel mapping or validation.
+    Any dereference without a prior ProbeForRead is a kernel arbitrary-read
+    candidate. GKE Ch.6 DVWD driver analysis.
+    """
+    findings: list[Finding] = []
+    if dispatch_table is None:
+        dispatch_table = extract_dispatch_table(bv)
+
+    ioctl_handlers = set(dispatch_table.ioctl_handlers)
+    if not ioctl_handlers:
+        return findings
+
+    for handler_addr in ioctl_handlers:
+        func = bv.get_function_at(handler_addr) if bv else None
+        if func is None:
+            continue
+        if not _handler_accesses_type3_buffer(func, bv):
+            continue
+        if _function_calls_probe(func):
+            continue   # ProbeForRead present — guarded
+        fname = ilh.function_display_name(func)
+        findings.append(Finding(
+            id="",
+            category="tainted_pointer_dereference",
+            severity=Severity.HIGH,
+            address=handler_addr,
+            function=fname,
+            binary=binary,
+            arch=arch,
+            platform=platform,
+            detector=detector,
+            knowledge_refs=["[[Memory/Knowledge/gke_windows_driver_exploitation]]"],
+            cwe=["CWE-822", "CWE-119"],
+            mitre_attack=["T1068"],
+            cia_impact=frozenset({"I", "A"}),
+            detection_altitude="ttp",
+            description=(
+                f"IOCTL handler {fname} at 0x{handler_addr:x} accesses "
+                f"Type3InputBuffer (offset 0x{_TYPE3_INPUT_BUFFER_OFFSET:x}) "
+                f"without ProbeForRead — METHOD_NEITHER user buffer accessed "
+                f"in kernel without validation (E9)"
+            ),
+            details={
+                "handler_addr": hex(handler_addr),
+                "type3_offset": hex(_TYPE3_INPUT_BUFFER_OFFSET),
+                "probe_present": False,
+                "pattern": "e9_neither_io_no_probe",
+            },
+        ))
+
+    return findings
+
+
 def analyze(session, *, binary: Optional[str] = None,
             arch: Optional[str] = None,
             platform: Optional[str] = None) -> list[Finding]:
@@ -584,7 +845,16 @@ def analyze(session, *, binary: Optional[str] = None,
     if not table.registrations:
         return []
 
+    common = dict(binary=binary, arch=arch, platform=platform,
+                  detector="analysis.windows_drivers")
+
     findings: list[Finding] = []
+
+    # E8: ProbeFor* with integer arithmetic on size argument
+    findings.extend(_find_probe_size_wraparound(bv, **common))
+
+    # E9: METHOD_NEITHER handler without ProbeForRead
+    findings.extend(_find_neither_io_without_probe(bv, **common, dispatch_table=table))
 
     # Per-handler findings, IOCTL handlers prioritised.
     seen_handlers: set[int] = set()

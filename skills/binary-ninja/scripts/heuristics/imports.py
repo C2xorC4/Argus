@@ -327,11 +327,45 @@ FORTIFY_CHECKED_VARIANTS: dict[str, str] = {
 
 
 # ─────────────────────────────────────────────────────────────────
+# E10 — HalDispatchTable+0x4 overwrite target
+#
+# NtQueryIntervalProfile is the user-mode trigger that calls through
+# HalDispatchTable+0x4 — the classic Windows kernel arbitrary-write
+# shellcode dispatch target (GKE Ch.6 DVWD analysis). Presence in a
+# non-Microsoft binary at indicator altitude; requires triage.
+# ─────────────────────────────────────────────────────────────────
+
+
+HAL_DISPATCH_TABLE_OVERWRITE: ImportPattern = ImportPattern(
+    name="imports.hal_dispatch_table_overwrite_target",
+    description=(
+        "NtQueryIntervalProfile / KeQueryIntervalProfile import — "
+        "HalDispatchTable+0x4 overwrite target signature; known kernel "
+        "exploit technique (GKE Ch.6 DVWD). Indicator-altitude: presence "
+        "alone does not confirm exploit; presence in non-Microsoft driver "
+        "or tool warrants review."
+    ),
+    severity=Severity.LOW,
+    category="kernel_exploit_indicator",
+    cwe=["CWE-822"],
+    mitre_attack=["T1068"],
+    knowledge_refs=["[[Memory/Knowledge/gke_windows_driver_exploitation]]"],
+    cia_impact=frozenset({"I"}),
+    detection_altitude="indicator",
+    import_names=["NtQueryIntervalProfile", "KeQueryIntervalProfile"],
+    all_required=False,
+    negative_context={
+        "module_name_prefix_any": ["ntoskrnl", "hal.", "ntdll", "win32k"],
+    },
+)
+
+
+# ─────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────
 
 
-PATTERNS: list[Pattern] = list(BANNED)
+PATTERNS: list[Pattern] = list(BANNED) + [HAL_DISPATCH_TABLE_OVERWRITE]
 
 
 def match(bv, *, binary: str, arch: str, platform: str,
@@ -342,12 +376,21 @@ def match(bv, *, binary: str, arch: str, platform: str,
     `injection.py`; this function only handles single-import banned
     signals.
     """
-    from ._base import imports_in, emit_finding
+    from ._base import imports_in, emit_finding, passes_negative_context
     imports = imports_in(bv)
     out = []
-    for pattern in BANNED:
-        hits = [name for name in pattern.import_names if name in imports]
-        if not hits:
+    for pattern in PATTERNS:
+        if not isinstance(pattern, ImportPattern):
+            continue
+        if pattern.all_required:
+            hits = [name for name in pattern.import_names if name in imports]
+            if len(hits) < len(pattern.import_names):
+                continue
+        else:
+            hits = [name for name in pattern.import_names if name in imports]
+            if not hits:
+                continue
+        if not passes_negative_context(pattern, module_name=binary):
             continue
         out.append(emit_finding(
             pattern,

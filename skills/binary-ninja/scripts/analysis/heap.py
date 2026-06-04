@@ -1095,6 +1095,72 @@ def find_struct_field_double_free(bv, *, binary: str, arch: str, platform: str,
     return findings
 
 
+def _infer_allocation_type(bv, output_var):
+    """Return the pointed-to struct type of an alloc SSA return variable, or None.
+
+    Checks the type of `output_var.var` in Binja's type system. If it's a
+    pointer to a struct, returns the struct type. If unresolved, returns None.
+    """
+    if bv is None or output_var is None:
+        return None
+    # output_var is an SSAVariable. Underlying Variable has .type.
+    var = getattr(output_var, "var", None)
+    if var is None:
+        return None
+    ty = getattr(var, "type", None)
+    if ty is None:
+        return None
+    # Pointer type: dereference to get the target struct type.
+    # Binja's PointerType has .target; StructureType has .members.
+    # Walk through at most two layers of pointers.
+    for _ in range(2):
+        target = getattr(ty, "target", None)
+        if target is None:
+            break
+        ty = target
+    members = getattr(ty, "members", None)
+    if members is not None:
+        return ty
+    return None
+
+
+def _enrich_with_struct_pointer_field(bv, finding, output_var) -> None:
+    """Annotate a heap_buffer_overflow Finding with struct pointer-field info.
+
+    Sets finding.details['struct_has_pointer_field'] to:
+      True  — Binja resolved the type and found at least one pointer-typed field
+      False — Binja resolved the type but found no pointer fields
+      None  — type is unknown (Binja has no type info for this alloc site)
+
+    When True, also sets finding.details['pointer_field_offsets'] with the
+    byte offsets of each pointer-typed member. This annotation is consumed by
+    the composition graph edge:
+      heap_buffer_overflow → arbitrary_write (condition: struct_has_pointer_field)
+    """
+    if finding is None:
+        return
+    struct_type = _infer_allocation_type(bv, output_var)
+    if struct_type is None:
+        finding.details["struct_has_pointer_field"] = None
+        return
+    # Check each member for pointer type.
+    members = getattr(struct_type, "members", []) or []
+    pointer_offsets = []
+    for m in members:
+        member_type = getattr(m, "type", None)
+        if member_type is None:
+            continue
+        # PointerType: has a .target attribute with a non-None value
+        if getattr(member_type, "target", None) is not None:
+            offset = getattr(m, "offset", None)
+            if offset is not None:
+                pointer_offsets.append(int(offset))
+    has_ptr = len(pointer_offsets) > 0
+    finding.details["struct_has_pointer_field"] = has_ptr
+    if has_ptr:
+        finding.details["pointer_field_offsets"] = pointer_offsets
+
+
 def find_heap_overflow(bv, *, binary: str, arch: str, platform: str,
                       detector: str) -> list[Finding]:
     findings: list[Finding] = []
@@ -1126,6 +1192,7 @@ def find_heap_overflow(bv, *, binary: str, arch: str, platform: str,
                 "size_var": size_var,
                 "size_var_str": _ssa_var_str(size_var) if size_var else "",
                 "function": func,
+                "output_var": output_var,
             }
 
     # For each copy callsite, see if the dst SSA var is an alloc handle.
@@ -1176,7 +1243,7 @@ def find_heap_overflow(bv, *, binary: str, arch: str, platform: str,
             # CRT denylist — suppress findings in shipped runtime code
             if _is_crt_internal(func_name):
                 continue
-            findings.append(_emit(
+            finding = _emit(
                 "heap_buffer_overflow",
                 addr=addr, function=func_name, binary=binary,
                 arch=arch, platform=platform, detector=detector,
@@ -1191,7 +1258,9 @@ def find_heap_overflow(bv, *, binary: str, arch: str, platform: str,
                     "copy_name": copy_name,
                     "copy_addr": hex(addr),
                 },
-            ))
+            )
+            _enrich_with_struct_pointer_field(bv, finding, alloc.get("output_var"))
+            findings.append(finding)
 
     return findings
 

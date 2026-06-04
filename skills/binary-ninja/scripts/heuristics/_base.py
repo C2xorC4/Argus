@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 import struct
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Literal, Optional
 
 from ..output.finding import Evidence, Finding, Severity
 
@@ -74,6 +74,8 @@ class Pattern:
     knowledge_refs: list[str] = field(default_factory=list)
     negative_context: dict[str, Any] = field(default_factory=dict)
     notes: str = ""                      # operator-facing context
+    cia_impact: frozenset = field(default_factory=frozenset)
+    detection_altitude: Literal["indicator", "ttp", "behavioral"] = "ttp"
 
 
 @dataclass
@@ -392,4 +394,6 @@ def emit_finding(
         evidence=list(evidence or []),
         description=desc,
         details=dict(details or {}),
+        cia_impact=frozenset(pattern.cia_impact),
+        detection_altitude=pattern.detection_altitude,
     )

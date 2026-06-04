@@ -18,7 +18,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from ..lib.state import FindingState, StateTransition
 
@@ -181,6 +181,16 @@ class Finding:
     vendor_program: Optional[str] = None        # "epicgames", "msrc", "bugcrowd:program-x"
     bounty_category: Optional[str] = None       # "Crash server not member of", "EAC LPE", ...
 
+    # --- Impact / detection taxonomy ---------------------------------
+    # CIA axes affected by this finding (set by detector at emit time).
+    # Empty = unknown. {"I"} for write primitives, {"C"} for infoleaks,
+    # {"C","I","A"} for full code-execution chains, etc.
+    cia_impact: frozenset = field(default_factory=frozenset)
+    # Altitude of the pattern that produced this finding. Inherited from
+    # Pattern.detection_altitude — lets consumers answer "which detectors
+    # break first under adversary pressure?"
+    detection_altitude: Literal["indicator", "ttp", "behavioral"] = "ttp"
+
     # ─────────────────────────────────────────────────────────────
     # Construction helpers
     # ─────────────────────────────────────────────────────────────
@@ -236,6 +246,8 @@ class Finding:
             "disclosure_altitude": self.disclosure_altitude.value,
             "vendor_program": self.vendor_program,
             "bounty_category": self.bounty_category,
+            "cia_impact": sorted(self.cia_impact),
+            "detection_altitude": self.detection_altitude,
         }
 
     def to_json(self, indent: Optional[int] = 2) -> str:
@@ -270,6 +282,8 @@ class Finding:
             disclosure_altitude=DisclosureAltitude(d.get("disclosure_altitude", DisclosureAltitude.INSTANCE.value)),
             vendor_program=d.get("vendor_program"),
             bounty_category=d.get("bounty_category"),
+            cia_impact=frozenset(d.get("cia_impact", [])),
+            detection_altitude=d.get("detection_altitude", "ttp"),
         )
 
     # ─────────────────────────────────────────────────────────────
@@ -296,6 +310,67 @@ class Finding:
         """One-line citation suitable for human-readable reports."""
         refs = ", ".join(self.knowledge_refs) if self.knowledge_refs else "(no Knowledge citation)"
         return f"{self.category} @ {self.function} ({self.binary}+{hex(self.address)}) — {refs}"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Cross-detector deduplication
+# ─────────────────────────────────────────────────────────────────
+
+_STATE_PRIORITY: dict[str, int] = {
+    "impact_verified": 4,
+    "impact_pending":  3,
+    "confirmed":       2,
+    "detected":        1,
+}
+
+
+def dedup_findings(findings: list["Finding"]) -> list["Finding"]:
+    """Coalesce findings that share (category, address, binary).
+
+    When multiple detectors independently detect the same bug at the
+    same location (e.g. heap.py and taint.py both emitting
+    heap_buffer_overflow at the same call site), keep the highest-
+    priority copy and merge the evidence lists and detector strings
+    from all duplicates into it.
+
+    Priority order (highest kept):
+      state rank > severity.numeric > len(evidence)
+
+    The surviving finding's detector field becomes a '+'-joined list of
+    all contributing detectors so the source is still traceable.
+    """
+    if not findings:
+        return findings
+
+    groups: dict[tuple, list["Finding"]] = {}
+    for f in findings:
+        key = (f.category, int(f.address) if isinstance(f.address, int) else 0, f.binary)
+        groups.setdefault(key, []).append(f)
+
+    result: list["Finding"] = []
+    for group in groups.values():
+        if len(group) == 1:
+            result.append(group[0])
+            continue
+        group.sort(key=lambda f: (
+            _STATE_PRIORITY.get(getattr(f.state, "value", str(f.state)).lower(), 0),
+            f.severity.numeric,
+            len(f.evidence),
+        ), reverse=True)
+        winner = group[0]
+        all_detectors = list(dict.fromkeys(
+            d for f in group for d in f.detector.split("+")
+        ))
+        if len(all_detectors) > 1:
+            winner.detector = "+".join(all_detectors)
+        seen_payloads: set[str] = {e.payload for e in winner.evidence}
+        for dup in group[1:]:
+            for ev in dup.evidence:
+                if ev.payload not in seen_payloads:
+                    winner.evidence.append(ev)
+                    seen_payloads.add(ev.payload)
+        result.append(winner)
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -335,5 +410,11 @@ FINDING_V2_SCHEMA = {
         "disclosure_altitude": {"enum": [a.value for a in DisclosureAltitude]},
         "vendor_program": {"type": ["string", "null"]},
         "bounty_category": {"type": ["string", "null"]},
+        "cia_impact": {
+            "type": "array",
+            "items": {"enum": ["C", "I", "A"]},
+            "uniqueItems": True,
+        },
+        "detection_altitude": {"enum": ["indicator", "ttp", "behavioral"]},
     },
 }
